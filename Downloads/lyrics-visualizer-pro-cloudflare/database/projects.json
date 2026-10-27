@@ -1,0 +1,91 @@
+{
+  "projects": [
+    {
+      "id": "demo-01",
+      "title": "Demo - Celestial Starlight",
+      "artist": "THEERA",
+      "audioUrl": "",
+      "duration": 180,
+      "lyrics": [
+        {
+          "id": "l1",
+          "time": 5.0,
+          "endTime": 8.5,
+          "text": "เธอคือความฝันที่ฉันเฝ้ารอ",
+          "x": 50,
+          "y": 50,
+          "scale": 1,
+          "rotation": 0,
+          "preset": "minimalist_pulse",
+          "style": {
+            "color": "#ffffff",
+            "glowColor": "#ffd700"
+          }
+        },
+        {
+          "id": "l2",
+          "time": 9.0,
+          "endTime": 13.2,
+          "text": "ท่ามกลางดวงดาวนับล้าน",
+          "x": 50,
+          "y": 60,
+          "scale": 1.2,
+          "rotation": 0,
+          "preset": "celestial_starlight",
+          "style": {
+            "color": "#ffd700",
+            "glowColor": "#ffaa00"
+          }
+        },
+        {
+          "id": "l3",
+          "time": 14.0,
+          "endTime": 18.0,
+          "text": "พุ่งทะยานไปในอวกาศ",
+          "x": 70,
+          "y": 30,
+          "scale": 1,
+          "rotation": -5,
+          "preset": "dimension_warp",
+          "style": {
+            "color": "#ffffff",
+            "glowColor": "#00ffff"
+          }
+        }
+      ],
+      "backgrounds": [
+        {
+          "id": "bg1",
+          "type": "gradient",
+          "value": "obsidian_gold",
+          "layer": 1,
+          "loop": "seamless",
+          "start": 0,
+          "duration": 180
+        },
+        {
+          "id": "bg2",
+          "type": "video",
+          "value": "",
+          "layer": 2,
+          "loop": "pingpong",
+          "start": 0,
+          "duration": 180
+        }
+      ],
+      "camera": [
+        {
+          "time": 0,
+          "z": 0,
+          "roll": 0,
+          "pitch": 0,
+          "fade": 300
+        }
+      ],
+      "visualizer": {
+        "type": "particle",
+        "enabled": true
+      }
+    }
+  ]
+}
