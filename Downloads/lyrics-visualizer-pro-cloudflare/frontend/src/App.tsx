@@ -8,12 +8,16 @@ import { PropertiesPanel } from './components/PropertiesPanel';
 import { BackgroundManager } from './components/BackgroundManager';
 import { useProjectStore } from './stores/projectStore';
 
+const BACKEND_URL = (import.meta as any).env.VITE_BACKEND_URL || 'http://localhost:4000';
+
 export default function App() {
   const { setProject, project } = useProjectStore();
   const [loading, setLoading] = useState(true);
+  const [isCloud, setIsCloud] = useState(false);
 
   useEffect(() => {
-    fetch(`${import.meta.env.VITE_BACKEND_URL || 'http://localhost:4000'}/api/projects`)
+    setIsCloud(BACKEND_URL.includes('workers.dev'));
+    fetch(`${BACKEND_URL}/api/projects`)
       .then(r=>r.json()).then(data=>{
         if (data[0]) setProject({ ...data[0], currentTime: 0, selectedCueId: null });
         setLoading(false);
@@ -31,38 +35,30 @@ export default function App() {
 
   return (
     <div className="h-screen w-screen flex flex-col bg-[#050505] text-white overflow-hidden">
-      {/* Header */}
       <div className="h-10 flex items-center justify-between px-4 bg-[#0f0f0f] border-b border-white/10">
-        <div className="font-bold text-sm">Lyrics Visualizer Pro Studio <span className="text-yellow-400">● Local</span></div>
+        <div className="font-bold text-sm">Lyrics Visualizer Pro Studio <span className={isCloud ? "text-green-400" : "text-yellow-400"}>● {isCloud ? "Cloud" : "Local"}</span></div>
         <div className="flex gap-2 text-[10px]">
           <span className="px-2 py-1 bg-white/5 rounded">Project: {project?.title}</span>
-          <span className="px-2 py-1 bg-green-500/20 text-green-300 rounded">Backend: :4000 ✓</span>
+          <span className="px-2 py-1 bg-green-500/20 text-green-300 rounded">Backend: {isCloud ? "peich.workers.dev" : ":4000"} ✓</span>
           <span className="px-2 py-1 bg-yellow-500/20 text-yellow-300 rounded">MCP: /mcp ✓</span>
         </div>
       </div>
-
       <div className="flex flex-1 overflow-hidden">
-        {/* Left */}
-        <div className="w-[260px] flex flex-col border-r border-white/10">
+        <div className="w-[260px] flex flex-col border-r border-white/10 bg-[#121212]">
           <PropertiesPanel />
         </div>
-
-        {/* Center */}
-        <div className="flex-1 flex flex-col">
+        <div className="flex-1 flex flex-col bg-black">
           <div className="flex-1 relative">
             <CanvasStage />
             <div className="absolute top-2 left-2"><BackgroundManager /></div>
           </div>
-          <div className="h-[180px]"><Timeline /></div>
+          <div className="h-[180px] border-t border-white/10"><Timeline /></div>
         </div>
-
-        {/* Right */}
-        <div className="w-[300px] flex flex-col">
+        <div className="w-[320px] flex flex-col border-l border-white/10">
           <div className="flex-1 overflow-hidden"><PresetCatalog /></div>
-          <div className="h-[280px]"><ChatPanel /></div>
+          <div className="h-[300px] border-t border-white/10"><ChatPanel /></div>
         </div>
       </div>
-
       <div className="h-6 bg-[#0a0a0a] border-t border-white/10 flex items-center px-3 text-[9px] text-white/30 gap-4">
         <span>Multi-track Timeline • Interactive Canvas • Per-line Styling • 19 Presets • MCP Chat</span>
         <span className="ml-auto">Export: 720p | 1080p | 4K • 30/60fps • 16:9 9:16 1:1</span>
