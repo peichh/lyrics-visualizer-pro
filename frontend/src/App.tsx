@@ -1,3 +1,4 @@
+
 import { useEffect, useState } from 'react';
 import { CanvasStage } from './components/CanvasStage';
 import { Timeline } from './components/Timeline';
@@ -6,23 +7,59 @@ import { ChatPanel } from './components/ChatPanel';
 import { PropertiesPanel } from './components/PropertiesPanel';
 import { BackgroundManager } from './components/BackgroundManager';
 import { useProjectStore } from './stores/projectStore';
-const BACKEND_URL = (import.meta as any).env.VITE_BACKEND_URL || 'http://localhost:4000';
+
+const BACKEND_URL = (import.meta as any).env.VITE_BACKEND_URL || 'https://lyrics-visualizer-pro-api.peich.workers.dev';
+
 export default function App() {
   const { setProject, project } = useProjectStore();
-  const [loading, setLoading] = useState(true);
-  const [isCloud, setIsCloud] = useState(false);
+  const [tab, setTab] = useState<'preset'|'chat'|'bg'>('preset');
+  const [rightCollapsed, setRightCollapsed] = useState(false);
+
   useEffect(() => {
-    setIsCloud(BACKEND_URL.includes('workers.dev'));
-    fetch(`${BACKEND_URL}/api/projects`).then(r=>r.json()).then(data=>{ if (data[0]) setProject({ ...data[0], currentTime: 0, selectedCueId: null }); setLoading(false); }).catch(()=>setLoading(false));
+    fetch(`${BACKEND_URL}/api/projects`).then(r=>r.json()).then(d=>{ if(d[0]) setProject({...d[0], currentTime:0, selectedCueId:null}) })
   }, []);
-  if (loading) return <div className="h-screen bg-black text-white flex items-center justify-center">โหลดสตูดิโอ...</div>;
+
   return (
-    <div className="h-screen w-screen flex flex-col bg-[#050505] text-white overflow-hidden">
-      <div className="h-10 flex items-center justify-between px-4 bg-[#0f0f0f] border-b border-white/10">
-        <div className="font-bold text-sm">Lyrics Visualizer Pro Studio <span className={isCloud ? "text-green-400" : "text-yellow-400"}>● {isCloud ? "Cloud" : "Local"}</span></div>
-        <div className="flex gap-2 text-"><span className="px-2 py-1 bg-white/5 rounded">Project: {project?.title}</span><span className="px-2 py-1 bg-green-500/20 text-green-300 rounded">Backend: {isCloud ? "peich.workers.dev" : ":4000"} ✓</span><span className="px-2 py-1 bg-yellow-500/20 text-yellow-300 rounded">MCP: /mcp ✓</span></div>
+    <div className="h-screen w-screen flex flex-col bg-[#080808] text-white">
+      {/* Header */}
+      <div className="h-11 flex items-center justify-between px-4 bg-[#111] border-b border-white/10">
+        <b>Lyrics Visualizer Pro Studio <span className="text-green-400">● Cloud</span></b>
+        <div className="text- opacity-60">Project: {project?.title} | {BACKEND_URL.includes('peich') ? 'peich.workers.dev ✓' : 'Local'}</div>
       </div>
-      <div className="flex flex-1 overflow-hidden"><div className="w- flex flex-col border-r border-white/10 bg-[#121212]"><PropertiesPanel /></div><div className="flex-1 flex flex-col bg-black"><div className="flex-1 relative"><CanvasStage /><div className="absolute top-2 left-2"><BackgroundManager /></div></div><div className="h- border-t border-white/10"><Timeline /></div></div><div className="w- flex flex-col border-l border-white/10"><div className="flex-1 overflow-hidden"><PresetCatalog /></div><div className="h- border-t border-white/10"><ChatPanel /></div></div></div>
+
+      <div className="flex flex-1 overflow-hidden">
+        {/* Left - Properties */}
+        <div className="w- bg-[#121212] border-r border-white/10 overflow-auto"><PropertiesPanel /></div>
+        
+        {/* Center - Canvas + Timeline */}
+        <div className="flex-1 flex flex-col bg-black">
+          <div className="flex-1 relative bg-[#050505] flex items-center justify-center">
+            <CanvasStage />
+          </div>
+          <div className="h- border-t border-white/10 bg-[#0e0e0e]"><Timeline /></div>
+        </div>
+
+        {/* Right - Tabs instead of full catalog */}
+        <div className={`${rightCollapsed ? 'w-' : 'w-'} transition-all bg-[#121212] border-l border-white/10 flex flex-col`}>
+          <div className="flex items-center h-9 border-b border-white/10">
+            {!rightCollapsed && (
+              <>
+                <button onClick={()=>setTab('preset')} className={`flex-1 h-full text-xs ${tab==='preset'?'bg-white/10':''}`}>Presets 19</button>
+                <button onClick={()=>setTab('chat')} className={`flex-1 h-full text-xs ${tab==='chat'?'bg-white/10':''}`}>แชตองศา</button>
+                <button onClick={()=>setTab('bg')} className={`flex-1 h-full text-xs ${tab==='bg'?'bg-white/10':''}`}>BG</button>
+              </>
+            )}
+            <button onClick={()=>setRightCollapsed(!rightCollapsed)} className="w-10 h-full text-xs"> {rightCollapsed ? '◀' : '▶'} </button>
+          </div>
+          {!rightCollapsed && (
+            <div className="flex-1 overflow-auto">
+              {tab==='preset' && <PresetCatalog />}
+              {tab==='chat' && <ChatPanel />}
+              {tab==='bg' && <BackgroundManager />}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
