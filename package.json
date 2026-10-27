@@ -1,0 +1,9 @@
+{
+  "name": "lyrics-visualizer-pro-monorepo",
+  "private": true,
+  "scripts": {
+    "dev:frontend": "cd frontend && npm run dev",
+    "dev:backend": "cd backend && npm run dev",
+    "dev:worker": "cd backend-worker && npm run dev"
+  }
+}
