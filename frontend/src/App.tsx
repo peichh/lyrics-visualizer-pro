@@ -17,31 +17,27 @@ export default function App() {
 
   useEffect(() => {
     fetch(`${BACKEND_URL}/api/projects`)
-      .then(r=>r.json())
-      .then(d=>{ 
-        if(d && d[0]) setProject({...d[0], currentTime:0, selectedCueId:null}); 
-        setLoading(false);
-      })
+      .then(r=>r.json()).then(d=>{ if(d && d[0]) setProject({...d[0], currentTime:0, selectedCueId:null}); setLoading(false); })
       .catch(()=>setLoading(false));
   }, []);
 
-  if (loading) return <div className="h-screen bg-black text-white flex items-center justify-center">โหลดสตูดิโอ...</div>;
+  if (loading) return <div className="h-screen bg-black text-white flex items-center justify-center font-sans">โหลดสตูดิโอ...</div>;
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-[#080808] text-white overflow-hidden">
-      <div className="h-11 flex items-center justify-between px-4 bg-[#111] border-b border-white/10">
+    <div className="h-screen w-screen flex flex-col bg-[#080808] text-white overflow-hidden font-sans">
+      <div className="h-11 flex items-center justify-between px-4 bg-[#111] border-b border-white/10 shrink-0">
         <div className="font-bold text-sm">Lyrics Visualizer Pro Studio <span className="text-green-400">● Cloud</span></div>
-        <div className="text-[11px] opacity-60">Project: {project?.title || 'Untitled'} | peich.workers.dev ✓</div>
+        <div className="text-[11px] opacity-70">Project: {project?.title || 'Untitled'} | peich.workers.dev ✓</div>
       </div>
       <div className="flex flex-1 overflow-hidden">
-        <div className="w-[280px] bg-[#121212] border-r border-white/10 overflow-auto"><PropertiesPanel /></div>
-        <div className="flex-1 flex flex-col bg-black">
+        <div className="w-[280px] bg-[#121212] border-r border-white/10 overflow-auto shrink-0"><PropertiesPanel /></div>
+        <div className="flex-1 flex flex-col bg-black overflow-hidden">
           <div className="flex-1 relative bg-[#050505] flex items-center justify-center overflow-hidden">
             <CanvasStage />
           </div>
-          <div className="h-[240px] border-t border-white/10 bg-[#0e0e0e] overflow-hidden"><Timeline /></div>
+          <div className="h-[240px] border-t border-white/10 bg-[#0e0e0e] overflow-hidden shrink-0"><Timeline /></div>
         </div>
-        <div className={`${rightCollapsed ? 'w-[44px]' : 'w-[360px]'} transition-all bg-[#121212] border-l border-white/10 flex flex-col`}>
+        <div className={`${rightCollapsed ? 'w-[44px]' : 'w-[360px]'} transition-all bg-[#121212] border-l border-white/10 flex flex-col shrink-0`}>
           <div className="flex items-center h-9 border-b border-white/10 shrink-0">
             {!rightCollapsed && (
               <>
