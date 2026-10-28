@@ -1,0 +1,15 @@
+import assert from 'node:assert/strict';
+import { applyApprovedChanges, validateCuePatch } from './proposals.ts';
+const project = { revision: 2, lyrics: [{ id: 'a', time: 1, endTime: 3, text: 'Hello' }] };
+const proposal = { baseRevision: 2, changes: [{cueId:'a',text:'New lyric'}] };
+assert.throws(() => applyApprovedChanges(project, proposal, false), /confirmation/);
+assert.throws(() => applyApprovedChanges(project, {...proposal,baseRevision:1}, true), /changed/);
+assert.throws(() => validateCuePatch({cueId:'a', x:Infinity}), /numeric/);
+assert.throws(() => validateCuePatch({cueId:'a', x:101}), /range/);
+assert.throws(() => validateCuePatch({cueId:'a', owner:'attacker'}), /Unsupported/);
+assert.throws(() => applyApprovedChanges(project, {...proposal,changes:[{cueId:'a',time:4}]}, true), /end/);
+const updated = applyApprovedChanges(project, proposal, true);
+assert.equal(updated.lyrics[0].text, 'New lyric');
+assert.equal(updated.revision, 3);
+assert.equal(project.lyrics[0].text, 'Hello');
+assert.equal(project.revision, 2);
