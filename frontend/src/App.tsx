@@ -275,6 +275,7 @@ export default function App() {
   const [recording, setRecording] = useState(false);
   const [converting, setConverting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
+  const [exportReady, setExportReady] = useState<{ url: string; filename: string; format: "MP4" | "WebM" } | null>(null);
   const [transcribing, setTranscribing] = useState(false);
   const [includeAudio, setIncludeAudio] = useState(true);
   const [exportQuality, setExportQuality] = useState<"1080p" | "720p">("1080p");
@@ -295,9 +296,12 @@ export default function App() {
   const hasAudio = !!audioUrl;
   const totalDur = useMemo(() => { if (duration > 0) return duration; return lyrics.length ? lyrics[lyrics.length - 1].time + 4 : 30; }, [duration, lyrics]);
   const exportBusy = recording || converting;
+  const studioLocked = exportBusy || !!exportReady;
   const exportPercent = recording
-    ? Math.min(99, Math.max(0, Math.floor((currentTime / Math.max(1, totalDur)) * 100)))
-    : Math.min(100, Math.max(0, Math.round(exportProgress)));
+    ? Math.min(50, Math.max(0, Math.floor((currentTime / Math.max(1, totalDur)) * 50)))
+    : converting
+      ? exportProgress >= 100 ? 100 : 50 + Math.min(49, Math.max(0, Math.floor(exportProgress / 2)))
+      : Math.min(100, Math.max(0, Math.round(exportProgress)));
   const activeIdx = useMemo(() => { let idx = -1; lyrics.forEach((l, i) => { if (currentTime >= l.time) idx = i; }); return idx; }, [currentTime, lyrics]);
   const activeLyric = activeIdx >= 0 ? lyrics[activeIdx] : null;
   const segStart = activeLyric ? activeLyric.time : 0;
@@ -456,18 +460,24 @@ export default function App() {
   useEffect(() => {
     const root = appRootRef.current;
     if (!root) return;
-    if (exportBusy) {
+    if (studioLocked) {
       root.setAttribute("inert", "");
       root.setAttribute("aria-hidden", "true");
     } else {
       root.removeAttribute("inert");
       root.removeAttribute("aria-hidden");
     }
-  }, [exportBusy]);
+  }, [studioLocked]);
+  useEffect(() => {
+    if (!studioLocked) return;
+    const keepPageOpen = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", keepPageOpen);
+    return () => window.removeEventListener("beforeunload", keepPageOpen);
+  }, [studioLocked]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (recording || converting) { e.preventDefault(); return; }
+      if (recording || converting || exportReady) { e.preventDefault(); return; }
       const tag = (e.target as HTMLElement)?.tagName; if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
       if (e.code === "Space") { e.preventDefault(); togglePlay(); }
       if (e.key === "ArrowRight") seek(currentTime + 5);
@@ -476,7 +486,7 @@ export default function App() {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") { e.preventDefault(); redo(); }
     };
     window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey);
-  }, [togglePlay, currentTime, totalDur, undo, redo, recording, converting]);
+  }, [togglePlay, currentTime, totalDur, undo, redo, recording, converting, exportReady]);
 
   // ---- draggable text box (pointer capture, snap, lock) ----
   const dragRef = useRef<{ mode: "move" | "scale"; startX: number; startY: number; origX: number; origY: number; origScale: number; pointerId: number } | null>(null);
@@ -581,22 +591,19 @@ export default function App() {
     const mime = MediaRecorder.isTypeSupported("video/webm;codecs=vp9") ? "video/webm;codecs=vp9" : "video/webm";
     if (!MediaRecorder.isTypeSupported(mime)) { setNotice("This browser cannot record video. Please try Chrome or Edge. · เบราว์เซอร์นี้ไม่รองรับการบันทึกวิดีโอ"); return; }
     const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8_000_000 });
+    const wasMuted = audioRef.current?.muted ?? false;
     void getFfmpeg().catch(() => {});
     chunksRef.current = [];
     rec.ondataavailable = (e) => { if (e.data.size) chunksRef.current.push(e.data); };
     rec.onstop = () => {
       cancelAnimationFrame(raf); stream.getTracks().forEach(track => track.stop());
-      audioRef.current?.pause(); setPlaying(false); setRecording(false); setConverting(true);
+      audioRef.current?.pause(); if (audioRef.current) audioRef.current.muted = wasMuted; setPlaying(false); setRecording(false); setConverting(true);
       const blob = new Blob(chunksRef.current, { type: mime });
       void (async () => {
         const { fetchFile } = await import('@ffmpeg/util');
         setNotice('กำลังเตรียมภาพและเสียงสำหรับ MP4…');
         const ffmpeg = await getFfmpeg();
-        const onProgress = ({progress}: {progress: number}) => {
-          const percent = Math.min(99, Math.max(0, Math.round(progress * 100)));
-          setExportProgress(percent);
-          setNotice(`กำลังแปลง MP4 ${percent}% · โปรดเปิดหน้านี้ไว้`);
-        };
+        const onProgress = ({progress}: {progress: number}) => setExportProgress(Math.min(99, Math.max(0, Math.round(progress * 100))));
         try {
           setNotice('กำลังเตรียมภาพและเสียงสำหรับ MP4…');
           await ffmpeg.writeFile('video.webm', await fetchFile(blob));
@@ -611,24 +618,24 @@ export default function App() {
           if (typeof data === 'string') throw new Error('Invalid MP4 output');
           setExportProgress(100);
           const url = URL.createObjectURL(new Blob([data as BlobPart], {type:'video/mp4'}));
-          const a = document.createElement('a'); a.href = url; a.download = `lyrics-visualizer-${exportQuality}-${aspect.replace(':','x')}.mp4`; a.click();
-          setTimeout(() => URL.revokeObjectURL(url), 60000);
-          setNotice('ดาวน์โหลด MP4 แล้ว · MP4 export complete');
+          const filename = `lyrics-visualizer-${exportQuality}-${aspect.replace(':','x')}.mp4`;
+          setExportReady({ url, filename, format: "MP4" });
+          setNotice('MP4 พร้อมดาวน์โหลด · Your video is ready');
         } finally {
           ffmpeg.off('progress', onProgress);
           await Promise.all(['video.webm', 'audio.input', 'output.mp4'].map(name => ffmpeg.deleteFile(name).catch(() => {})));
         }
       })().catch((error) => {
         console.error('MP4 export failed', error);
-        const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'lyrics-visualizer-recovery.webm'; a.click();
-        setTimeout(() => URL.revokeObjectURL(url), 60000);
-        setNotice('แปลง MP4 ไม่สำเร็จ ดาวน์โหลดวิดีโอสำรองแบบ WebM โดยไม่มีเสียงแล้ว กรุณาลองใหม่');
+        const url = URL.createObjectURL(blob);
+        setExportReady({ url, filename: 'lyrics-visualizer-recovery.webm', format: "WebM" });
+        setNotice('แปลง MP4 ไม่สำเร็จ · มีไฟล์ WebM สำรองให้ดาวน์โหลด');
       }).finally(() => setConverting(false));
     };
     let raf = 0; const draw = () => { drawExportFrameRef.current(ctx, W, H); raf = requestAnimationFrame(draw); };
     recorderRef.current = rec; exportStopRef.current = () => { if (rec.state !== 'inactive') rec.stop(); };
     rec.start(250); draw(); setRecording(true); seek(0);
-    if (audioRef.current && audioUrl) void audioRef.current.play().catch(() => {}); else setPlaying(true);
+    if (audioRef.current && audioUrl) { audioRef.current.muted = true; void audioRef.current.play().catch(() => {}); } else setPlaying(true);
     setNotice("กำลังบันทึกวิดีโอแบบเรียลไทม์ เมื่อเพลงจบระบบจะแปลงเป็น MP4 อัตโนมัติ");
   };
 
@@ -759,7 +766,7 @@ export default function App() {
 
   return (
     <>
-    <div ref={appRootRef} data-safe-area-inset-root className={`flex h-screen w-full flex-col overflow-hidden bg-[var(--bg)] text-[var(--ink)] transition-opacity duration-200 ${exportBusy ? "opacity-25" : "opacity-100"}`} style={{ boxSizing: "border-box", paddingTop: "var(--safe-area-inset-top)" }}>
+    <div ref={appRootRef} data-safe-area-inset-root className={`flex h-screen w-full flex-col overflow-hidden bg-[var(--bg)] text-[var(--ink)] transition-opacity duration-200 ${studioLocked ? "opacity-40" : "opacity-100"}`} style={{ boxSizing: "border-box", paddingTop: "var(--safe-area-inset-top)" }}>
       <header data-safe-area-sticky-top className="studio-header z-40 shrink-0 border-b border-[var(--border)]" style={{ top: "var(--safe-area-inset-top)" }}>
         <div className="flex flex-wrap items-center gap-2 px-4 py-2.5">
           <div className="flex items-center gap-2.5">
@@ -1252,15 +1259,28 @@ export default function App() {
       <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/65 p-4 backdrop-blur-[3px]" role="alertdialog" aria-modal="true" aria-labelledby="export-progress-title" aria-describedby="export-progress-help">
         <section className="w-full max-w-md rounded-2xl border border-white/15 bg-zinc-950/95 p-6 text-white shadow-2xl">
           <div className="mb-4 flex items-center justify-between gap-4">
-            <h2 id="export-progress-title" className="text-base font-semibold">{recording ? "กำลัง render วิดีโอ" : "กำลังแปลงเป็น MP4"}</h2>
+            <h2 id="export-progress-title" className="text-base font-semibold">กำลัง render และทำไฟล์ MP4</h2>
             <span className="mono text-sm text-lime-300">{exportPercent}%</span>
           </div>
-          <div className="h-2.5 overflow-hidden rounded-full bg-white/15" role="progressbar" aria-label="Export progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={exportPercent}>
+          <div className="relative h-2.5 overflow-hidden rounded-full bg-white/15" role="progressbar" aria-label="Render and MP4 conversion progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={exportPercent}>
             <div className="h-full rounded-full bg-lime-300 transition-[width] duration-300" style={{ width: `${exportPercent}%` }} />
+            <div className="absolute left-1/2 top-0 h-full w-px bg-white/70" aria-hidden="true" />
           </div>
-          <p className="mt-3 text-sm text-zinc-300">{recording ? "กำลังเล่นเพลงและบันทึกภาพทีละเฟรม" : "กำลังเข้ารหัสภาพและเสียงเป็นไฟล์ MP4"}</p>
-          <p id="export-progress-help" className="mt-2 text-xs leading-relaxed text-zinc-400">กรุณาเปิดหน้านี้ไว้จนกว่าจะดาวน์โหลดเสร็จ อย่ารีเฟรชหรือเปลี่ยนหน้า เครื่องมือจะกลับมาใช้ได้เมื่อ export เสร็จ · Keep this page open until the MP4 downloads.</p>
+          <div className="mt-2 flex justify-between text-[10px] text-zinc-400"><span>0–50% · บันทึกภาพ</span><span>50–100% · แปลง MP4</span></div>
+          <p id="export-progress-help" className="mt-4 text-xs leading-relaxed text-zinc-300">{recording ? "กำลังเล่นเพลงและบันทึกภาพ · เปิดหน้านี้ไว้จนเสร็จ" : "กำลังเข้ารหัส MP4 · เปิดหน้านี้ไว้จนดาวน์โหลดได้"}</p>
           {recording && <button onClick={() => exportStopRef.current?.()} className="mt-5 rounded-lg border border-white/25 px-3 py-2 text-xs font-semibold text-white hover:bg-white/10">หยุด export</button>}
+        </section>
+      </div>
+    )}
+    {exportReady && !exportBusy && (
+      <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="export-ready-title">
+        <section className="w-full max-w-md rounded-2xl border border-white/15 bg-zinc-950/95 p-6 text-white shadow-2xl">
+          <div className="mb-4 flex items-center gap-3"><div className="flex h-10 w-10 items-center justify-center rounded-full bg-lime-300/15 text-lime-300"><Check className="h-5 w-5" /></div><div><h2 id="export-ready-title" className="text-lg font-semibold">{exportReady.format} พร้อมดาวน์โหลด</h2><p className="text-xs text-zinc-400">วิดีโอเรนเดอร์เสร็จแล้ว · Your video is ready</p></div></div>
+          <div className="mb-5 rounded-xl border border-white/10 bg-white/5 p-3"><p className="break-all text-xs font-medium text-zinc-200">{exportReady.filename}</p><p className="mt-1 text-[11px] text-zinc-400">{exportReady.format === "MP4" ? `${exportQuality} · ${aspect} · ${fmt(totalDur)}` : "วิดีโอสำรอง · ไม่มีเสียง"}</p></div>
+          <div className="flex gap-2">
+            <a href={exportReady.url} download={exportReady.filename} className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-[var(--accent)] px-4 py-3 text-sm font-bold text-white shadow-[0_0_18px_rgba(139,92,246,.35)]"><Download className="h-4 w-4" /> ดาวน์โหลด {exportReady.format}</a>
+            <button onClick={() => { URL.revokeObjectURL(exportReady.url); setExportReady(null); }} className="rounded-xl border border-white/20 px-4 py-3 text-sm font-semibold text-zinc-200 hover:bg-white/10">ปิด</button>
+          </div>
         </section>
       </div>
     )}
