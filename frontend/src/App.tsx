@@ -1019,7 +1019,7 @@ export default function App() {
                   <input type="file" accept=".lrc,.txt,.srt,text/plain" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void onLyricsFile(f); }} />
                 </label>
                 <button onClick={() => void transcribeAudio()} disabled={!audioFile || transcribing} className={`${btnGhost} mt-2 w-full justify-center disabled:opacity-40`} title={titleAttr("Use Whisper to detect words and their timing", "ใช้ Whisper จับคำและเวลาเพื่อทำคาราโอเกะระดับคำ")}>
-                  {transcribing ? `Whisper ${transcribeProgress}%…` : "✦ Whisper · จับเวลาเนื้อเพลง"}
+                  {transcribing ? "Whisper กำลังฟังเพลง…" : "✦ Whisper · จับเวลาเนื้อเพลง"}
                 </button>
                 <textarea value={pasteText} onChange={(e) => setPasteText(e.target.value)} rows={3} placeholder={"Paste lyrics here, one line per row…\nวางเนื้อเพลงตรงนี้ บรรทัดละท่อน…"} className="mt-2 w-full resize-y rounded-xl border border-[var(--border)] bg-[var(--surface2)] p-2.5 text-xs outline-none placeholder:text-zinc-600 focus:border-[var(--accent)]" />
                 <div className="mt-2 grid grid-cols-2 gap-2">
