@@ -263,6 +263,7 @@ export default function App() {
   const [loopPreview, setLoopPreview] = useState(true);
   const [bgFade, setBgFade] = useState(0.8);
   const [seqMode, setSeqMode] = useState<"time" | "lyrics">("time");
+  const [timelineZoom, setTimelineZoom] = useState(100);
   const [dragging, setDragging] = useState(false);
   const [textSelected, setTextSelected] = useState(true);
   const [snapX, setSnapX] = useState(false);
@@ -380,7 +381,7 @@ export default function App() {
   const transcribeAudio = async () => {
     if (!audioFile) { setNotice('เพิ่มไฟล์เพลงก่อนใช้ Whisper · Upload a song first'); return; }
     const key = localStorage.getItem('lyrics-studio-account-key');
-    if (!key) { setTab('cloud'); setNotice('สร้างบัญชีในแท็บ Cloud · AI ก่อน แล้วกลับมากด Whisper อีกครั้ง'); return; }
+    if (!key) { setTab('cloud'); setNotice('สร้างบัญชีในแท็บ Cloud ก่อน แล้วกลับมากด Whisper อีกครั้ง'); return; }
     setTranscribing(true);
     try {
       setNotice('กำลังเตรียมเสียงเป็นโมโน 16 kHz เพื่อส่งให้ Whisper…');
@@ -493,6 +494,7 @@ export default function App() {
   // ---- draggable text box (pointer capture, snap, lock) ----
   const dragRef = useRef<{ mode: "move" | "scale"; startX: number; startY: number; origX: number; origY: number; origScale: number; pointerId: number } | null>(null);
   const onTextPointerDown = (e: React.PointerEvent) => {
+    e.stopPropagation();
     if (ts.locked) return;
     const stage = stageRef.current; if (!stage) return;
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -658,7 +660,7 @@ export default function App() {
           type="range" aria-label={l} min={min} max={max} step={step} value={v}
           onChange={(e) => on(parseFloat(e.target.value))}
           style={{ ["--fill" as string]: `${pct}%` }}
-          className="block w-full"
+          className="block w-full touch-none"
         />
       </div>
     );
@@ -970,14 +972,19 @@ export default function App() {
           </div>
 
           {/* Timeline pinned inside center bottom — fixed height, horizontal scroll only */}
-          <div className="h-[180px] shrink-0 overflow-hidden border-t border-[var(--border)] bg-[var(--surface)] max-xl:h-[96px]">
+          <div className="h-[180px] shrink-0 overflow-hidden border-t border-[var(--border)] bg-[var(--surface)] max-xl:h-[132px]">
             <div className="flex items-center gap-2 px-3.5 pt-2 max-xl:px-2 max-xl:pt-1">
               <Clock3 className="h-4 w-4 text-[var(--accent)]" /><span className={label}>Timeline · ไทม์ไลน์</span>
-              <span className={`${label} ml-auto`}>{lyrics.length} lines · {backgrounds.length} clips</span>
+              <div className="ml-auto flex items-center gap-1.5">
+                <button onClick={() => setTimelineZoom((z) => Math.max(50, z - 10))} className="rounded border border-[var(--border)] px-1.5 text-xs" aria-label="Zoom timeline out">−</button>
+                <input type="range" min={50} max={300} step={10} value={timelineZoom} onChange={(e) => setTimelineZoom(Number(e.target.value))} className="w-16 touch-none accent-[var(--accent)]" aria-label="Timeline zoom" />
+                <span className="mono w-9 text-right text-[9px] text-[var(--muted)]">{timelineZoom}%</span>
+                <button onClick={() => setTimelineZoom((z) => Math.min(300, z + 10))} className="rounded border border-[var(--border)] px-1.5 text-xs" aria-label="Zoom timeline in">+</button>
+              </div>
             </div>
-            <div className="thin-scroll h-[calc(180px-34px)] overflow-x-auto overflow-y-hidden px-3.5 pb-2 pt-1.5 max-xl:h-[calc(96px-22px)] max-xl:px-2 max-xl:pt-1">
-              <div className="min-w-[560px]">
-                <Waveform audioUrl={audioUrl} progress={duration ? currentTime / duration : 0} onSeek={(p) => seek(p * totalDur)} tall />
+            <div className="thin-scroll h-[calc(180px-34px)] overflow-x-auto overflow-y-hidden px-3.5 pb-2 pt-1.5 max-xl:h-[calc(132px-24px)] max-xl:px-2 max-xl:pt-1">
+              <div style={{ width: `${timelineZoom}%`, minWidth: `${560 * timelineZoom / 100}px` }}>
+                <Waveform audioUrl={audioUrl} progress={duration ? currentTime / totalDur : 0} onSeek={(p) => seek(p * totalDur)} tall />
                 <div className="relative mt-1.5 h-12 rounded-lg bg-black/40" title={titleAttr("Drag a block left/right to retime it", "ลากบล็อกซ้าย-ขวาเพื่อปรับเวลา")}>
                   {lyrics.map((l, i) => {
                     const next = lyrics[i + 1]; const w = ((next ? next.time : totalDur) - l.time) / totalDur * 100;
@@ -985,10 +992,11 @@ export default function App() {
                       <div key={l.id}
                         onPointerDown={(e) => {
                           const parent = (e.currentTarget.parentElement as HTMLElement).getBoundingClientRect();
-                          const startX = e.clientX; const orig = l.time; let moved = false;
-                          const move = (ev: PointerEvent) => { if (Math.abs(ev.clientX - startX) > 3) moved = true; if (moved) { const t = Math.max(0, Math.min(totalDur - 0.1, orig + ((ev.clientX - startX) / parent.width) * totalDur)); setLyrics((prev) => prev.map((x) => x.id === l.id ? { ...x, time: Math.round(t * 100) / 100 } : x)); } };
-                          const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); if (moved) { pushHistory(); setLyrics((prev) => [...prev].sort((a, b) => a.time - b.time)); } else seek(l.time); };
-                          window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+                          const startX = e.clientX; const orig = l.time; let moved = false; let latestX = startX; let frame = 0;
+                          const apply = (clientX: number) => { if (Math.abs(clientX - startX) > 3) moved = true; if (moved) { const raw = Math.max(0, Math.min(totalDur - 0.1, orig + ((clientX - startX) / parent.width) * totalDur)); const nextTime = Math.round(raw * 100) / 100; const delta = nextTime - orig; setLyrics((prev) => prev.map((x) => x.id === l.id ? { ...x, time: nextTime, wordTimings: x.wordTimings?.map(word => ({ ...word, start: word.start + delta, end: word.end + delta })) } : x)); } };
+                          const move = (ev: PointerEvent) => { latestX = ev.clientX; if (!frame) frame = requestAnimationFrame(() => { frame = 0; apply(latestX); }); };
+                          const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); window.removeEventListener("pointercancel", up); if (frame) { cancelAnimationFrame(frame); frame = 0; apply(latestX); } if (moved) { pushHistory(); setLyrics((prev) => [...prev].sort((a, b) => a.time - b.time)); } else seek(l.time); };
+                          window.addEventListener("pointermove", move); window.addEventListener("pointerup", up); window.addEventListener("pointercancel", up);
                         }}
                         className={`absolute top-1 flex h-10 cursor-ew-resize items-center overflow-hidden rounded-md border px-1.5 ${i === activeIdx ? "border-[var(--accent)] bg-[var(--accent)] text-white" : "border-[var(--border)] bg-[var(--surface2)] hover:border-[var(--accent)]"}`}
                         style={{ left: `${(l.time / totalDur) * 100}%`, width: `max(26px, ${w}%)` }}>
@@ -996,7 +1004,7 @@ export default function App() {
                       </div>
                     );
                   })}
-                  <div className="pointer-events-none absolute top-0 h-full w-px bg-[var(--accent2)]" style={{ left: `${(currentTime / totalDur) * 100}%` }} />
+                  <div onPointerDown={(e) => { e.stopPropagation(); const track = e.currentTarget.parentElement as HTMLElement; track.setPointerCapture(e.pointerId); let latestX = e.clientX; let frame = 0; const apply = (clientX: number) => { const r = track.getBoundingClientRect(); seek(Math.max(0, Math.min(totalDur, ((clientX - r.left) / r.width) * totalDur))); }; const scrub = (ev: PointerEvent) => { latestX = ev.clientX; if (!frame) frame = requestAnimationFrame(() => { frame = 0; apply(latestX); }); }; const end = () => { window.removeEventListener("pointermove", scrub); window.removeEventListener("pointerup", end); window.removeEventListener("pointercancel", end); if (frame) { cancelAnimationFrame(frame); frame = 0; apply(latestX); } }; apply(latestX); window.addEventListener("pointermove", scrub); window.addEventListener("pointerup", end); window.addEventListener("pointercancel", end); }} className="absolute top-0 z-20 h-full w-3 -translate-x-1/2 cursor-ew-resize touch-none" style={{ left: `${(currentTime / totalDur) * 100}%` }} aria-label="Drag playhead"><div className="pointer-events-none mx-auto h-full w-px bg-[var(--accent2)]" /></div>
                 </div>
                 {backgrounds.length > 0 && (
                   <div className="relative mt-1.5 h-8 rounded-lg bg-black/30">
@@ -1017,7 +1025,7 @@ export default function App() {
         {/* RIGHT — independent scroll, sticky tabs */}
         <aside className={`studio-sidebar min-h-0 flex-col overflow-hidden border-l border-[var(--border)] bg-[var(--surface)] xl:w-[380px] xl:shrink-0 max-xl:w-full max-xl:min-h-0 max-xl:flex-1 max-xl:border-l-0 max-xl:border-t ${mobileView === "tools" || mobileView === "export" ? "flex max-xl:flex" : "hidden max-xl:hidden"} xl:flex`}>
           <div className="sticky top-0 z-10 hidden shrink-0 border-b border-[var(--border)] bg-[var(--surface)] xl:flex">
-            {([["media", "Media · สื่อ", Music2], ["text", "Text · ตัวอักษร", Type], ["background", "Background · พื้นหลัง", Layers], ["presets", "Presets · พรีเซ็ต", Sparkles], ["cloud", "Cloud · AI", Check]] as const).map(([k, l, Icon]) => (
+            {([["media", "Media · สื่อ", Music2], ["text", "Text · ตัวอักษร", Type], ["background", "Background · พื้นหลัง", Layers], ["presets", "Presets · พรีเซ็ต", Sparkles], ["cloud", "Cloud", Check]] as const).map(([k, l, Icon]) => (
               <button key={k} onClick={() => setTab(k)} className={`flex flex-1 items-center justify-center gap-1.5 px-1.5 py-2.5 text-[10px] font-bold ${tab === k ? "bg-[var(--accent-soft)] text-white shadow-[inset_0_-2px_0_var(--accent)]" : "text-[var(--muted)] hover:text-white"}`}><Icon className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{l}</span></button>
             ))}
           </div>
@@ -1052,6 +1060,7 @@ export default function App() {
                 <button onClick={() => void transcribeAudio()} disabled={!audioFile || transcribing} className={`${btnGhost} mt-2 w-full justify-center disabled:opacity-40`} title={titleAttr("Use Whisper to detect words and their timing", "ใช้ Whisper จับคำและเวลาเพื่อทำคาราโอเกะระดับคำ")}>
                   {transcribing ? "Whisper กำลังฟังเพลง…" : "✦ Whisper · จับเวลาเนื้อเพลง"}
                 </button>
+                <p className="text-[10px] text-[var(--muted)]">บัญชีทั่วไปใช้ Whisper ได้ 2 เพลงต่อวัน (รีเซ็ตเที่ยงคืนเวลาไทย) · จำกัดต่อคีย์บัญชี</p>
                 <textarea value={pasteText} onChange={(e) => setPasteText(e.target.value)} rows={3} placeholder={"Paste lyrics here, one line per row…\nวางเนื้อเพลงตรงนี้ บรรทัดละท่อน…"} className="mt-2 w-full resize-y rounded-xl border border-[var(--border)] bg-[var(--surface2)] p-2.5 text-xs outline-none placeholder:text-zinc-600 focus:border-[var(--accent)]" />
                 <div className="mt-2 grid grid-cols-2 gap-2">
                   <button onClick={autoTimestamp} className={btnGhost} title={titleAttr("Auto-timestamp every 3 seconds", "ใส่เวลาอัตโนมัติทุก 3 วิ")}><Timer className="h-3.5 w-3.5" /> Auto-time 3s</button>
@@ -1276,7 +1285,7 @@ export default function App() {
       </main>
 
       <nav className="flex h-[62px] shrink-0 items-stretch justify-around overflow-x-auto border-t border-[var(--border)] bg-[rgba(14,14,18,.98)] px-1 pb-[env(safe-area-inset-bottom)] shadow-[0_-8px_24px_rgba(0,0,0,.28)] xl:hidden" aria-label="Mobile editing toolbar">
-        {([ ["stage", "Preview", MonitorPlay], ["media", "Media", Music2], ["text", "Text", Type], ["background", "Backdrop", Layers], ["presets", "Style", Sparkles], ["cloud", "AI / MCP", Check], ["export", "Export", Download]] as const).map(([key, title, Icon]) => {
+        {([ ["stage", "Preview", MonitorPlay], ["media", "Media", Music2], ["text", "Text", Type], ["background", "Backdrop", Layers], ["presets", "Style", Sparkles], ["cloud", "Cloud", Check], ["export", "Export", Download]] as const).map(([key, title, Icon]) => {
           const selected = key === "stage" ? mobileView === "stage" : key === "export" ? mobileView === "export" : mobileView === "tools" && tab === key;
           return <button key={key} onClick={() => key === "stage" ? setMobileView("stage") : key === "export" ? setMobileView("export") : (setMobileView("tools"), setTab(key))} aria-pressed={selected} className={`relative flex min-w-0 flex-1 flex-col items-center justify-center gap-1 px-0.5 text-[9px] font-semibold transition ${selected ? "text-[var(--accent)]" : "text-[var(--muted)] hover:text-white"}`}><Icon className="h-[18px] w-[18px]" /><span className="whitespace-nowrap">{title}</span>{selected && <span className="absolute inset-x-2 top-0 h-0.5 rounded-b bg-[var(--accent)] shadow-[0_0_12px_var(--accent)]" />}</button>;
         })}

@@ -5,11 +5,14 @@ import { accountForKey, proposalRoutes } from './proposalRoutes';
 import { validateProject } from './projectValidation';
 
 type WorkersAI = { run(model: string, input: { audio: number[] }): Promise<unknown> };
-type Bindings = { DB: D1Database; FRONTEND_URL: string; AI?: WorkersAI };
+type Bindings = { DB: D1Database; FRONTEND_URL: string; OWNER_API_KEY_HASH?: string; AI?: WorkersAI; ACCOUNT_LIMITER?: { limit(input: { key: string }): Promise<{ success: boolean }> }; WHISPER_LIMITER?: { limit(input: { key: string }): Promise<{ success: boolean }> } };
 type Variables = { userId: string };
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 const hash = async (value: string) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value))),b=>b.toString(16).padStart(2,'0')).join('');
+const secureEqual=(a:string,b:string)=>{if(a.length!==b.length)return false;let mismatch=0;for(let i=0;i<a.length;i++)mismatch|=a.charCodeAt(i)^b.charCodeAt(i);return mismatch===0;};
 const trustedOrigin=(origin:string,frontEnd:string)=>{try{const url=new URL(origin);return origin===frontEnd||url.hostname.endsWith('.lyrics-visualizer-pro.pages.dev')||['localhost','127.0.0.1'].includes(url.hostname);}catch{return false;}};
+const isOwner=async(c:any,key:string)=>!!c.env.OWNER_API_KEY_HASH&&secureEqual(await hash(key),c.env.OWNER_API_KEY_HASH);
+const clientIp=(c:any)=>c.req.header('CF-Connecting-IP')||'unknown';
 const validateMcpOrigin=async(c:any,next:()=>Promise<void>)=>{const origin=c.req.header('Origin');if(origin&&!trustedOrigin(origin,c.env.FRONTEND_URL))return c.json({error:'Origin not allowed'},403);await next();};
 app.use('/mcp',validateMcpOrigin);
 app.use('/mcp/*',validateMcpOrigin);
@@ -18,6 +21,7 @@ app.use('/*',cors({origin:(origin,c)=>!origin?(c.env.FRONTEND_URL||'*'):trustedO
 
 // Each person gets a random API key once. Only its hash is stored.
 app.post('/api/account',async c=>{
+  if(c.env.ACCOUNT_LIMITER&&!(await c.env.ACCOUNT_LIMITER.limit({key:clientIp(c)})).success)return c.json({error:'Too many accounts created from this network. Try again later.'},429);
   const key=`lv_${crypto.randomUUID().replaceAll('-','')}${crypto.randomUUID().replaceAll('-','')}`;
   const id=crypto.randomUUID();
   await c.env.DB.prepare('INSERT INTO users(id,api_key_hash) VALUES(?,?)').bind(id,await hash(key)).run();
@@ -33,7 +37,16 @@ app.use('/api/*',async(c,next)=>{
   c.set('userId',user.id);await next();
 });
 
+app.use('/api/proposals/*',async(c,next)=>{
+  if(!await isOwner(c,c.req.header('Authorization')?.slice(7)||''))return c.json({error:'AI review is available to the site owner only'},403);
+  await next();
+});
+app.use('/api/proposals',async(c,next)=>{
+  if(!await isOwner(c,c.req.header('Authorization')?.slice(7)||''))return c.json({error:'AI review is available to the site owner only'},403);
+  await next();
+});
 app.route('/api/proposals',proposalRoutes);
+app.get('/api/account/me',async c=>c.json({isOwner:await isOwner(c,c.req.header('Authorization')?.slice(7)||'')}));
 app.get('/api/projects',async c=>{
   const {results}=await c.env.DB.prepare('SELECT p.data FROM projects p JOIN project_owners o ON o.project_id=p.id WHERE o.user_id=? ORDER BY p.updated_at DESC').bind(c.get('userId')).all<{data:string}>();
   return c.json(results.map(row=>JSON.parse(row.data)));
@@ -67,6 +80,7 @@ app.get('/api/projects/:id',async c=>{
 // mono 16 kHz PCM WAV, then chunked here so a long track never becomes one huge
 // model input. Daily caps keep the public preview inside the free AI allowance.
 app.post('/api/transcribe',async c=>{
+  if(c.env.WHISPER_LIMITER&&!(await c.env.WHISPER_LIMITER.limit({key:clientIp(c)})).success)return c.json({error:'Too many Whisper requests from this network. Try again later.'},429);
   if(!c.env.AI)return c.json({error:'Whisper is not enabled for this service yet'},503);
   const contentLength=Number(c.req.header('Content-Length')||0);
   if(contentLength>20*1024*1024)return c.json({error:'Audio is too large. Maximum is 20 MB after audio preparation.'},413);
@@ -80,11 +94,16 @@ app.post('/api/transcribe',async c=>{
   for(let offset=12;offset+8<=bytes.length;){const name=String.fromCharCode(...bytes.subarray(offset,offset+4));const size=view.getUint32(offset+4,true);const start=offset+8;if(start+size>bytes.length)return c.json({error:'Invalid WAV file'},400);if(name==='fmt '&&size>=16){format=view.getUint16(start,true);channels=view.getUint16(start+2,true);sampleRate=view.getUint32(start+4,true);bits=view.getUint16(start+14,true);}if(name==='data'){dataStart=start;dataLength=size;break;}offset=start+size+(size%2);}
   if(format!==1||channels!==1||sampleRate!==16000||bits!==16||dataStart<0||dataLength%2)return c.json({error:'Audio must be mono 16 kHz PCM WAV'},400);
   const samples=dataLength/2;const duration=samples/sampleRate;const seconds=Math.ceil(duration);if(seconds<1||seconds>1800)return c.json({error:'Audio must be between 1 second and 30 minutes'},400);
-  const day=new Date().toISOString().slice(0,10);const userId=c.get('userId');
+  const day=new Date(Date.now()+7*60*60*1000).toISOString().slice(0,10);const userId=c.get('userId');
+  const owner=await isOwner(c,c.req.header('Authorization')?.slice(7)||'');
+  if(!owner){
+    const reserveTrack=await c.env.DB.prepare('INSERT INTO whisper_track_usage(day,user_id,songs) VALUES(?,?,1) ON CONFLICT(day,user_id) DO UPDATE SET songs=songs+1 WHERE songs<2').bind(day,userId).run();
+    if(reserveTrack.meta.changes!==1)return c.json({error:'This account has reached its two-song daily Whisper limit'},429);
+  }
   const reserveUser=await c.env.DB.prepare('INSERT INTO ai_usage(day,user_id,seconds) VALUES(?,?,?) ON CONFLICT(day,user_id) DO UPDATE SET seconds=seconds+excluded.seconds WHERE seconds+excluded.seconds<=1800').bind(day,userId,seconds).run();
-  if(reserveUser.meta.changes!==1)return c.json({error:'This account has reached its 30 minute daily Whisper allowance'},429);
+  if(reserveUser.meta.changes!==1){if(!owner)await c.env.DB.prepare('UPDATE whisper_track_usage SET songs=MAX(0,songs-1) WHERE day=? AND user_id=?').bind(day,userId).run();return c.json({error:'This account has reached its 30 minute daily Whisper allowance'},429);}
   const reserveGlobal=await c.env.DB.prepare('INSERT INTO ai_global_usage(day,seconds) VALUES(?,?) ON CONFLICT(day) DO UPDATE SET seconds=seconds+excluded.seconds WHERE seconds+excluded.seconds<=10800').bind(day,seconds).run();
-  if(reserveGlobal.meta.changes!==1){await c.env.DB.prepare('UPDATE ai_usage SET seconds=MAX(0,seconds-?) WHERE day=? AND user_id=?').bind(seconds,day,userId).run();return c.json({error:'The shared free Whisper allowance is used up for today. Try again after 00:00 UTC.'},429);}
+  if(reserveGlobal.meta.changes!==1){await c.env.DB.prepare('UPDATE ai_usage SET seconds=MAX(0,seconds-?) WHERE day=? AND user_id=?').bind(seconds,day,userId).run();if(!owner)await c.env.DB.prepare('UPDATE whisper_track_usage SET songs=MAX(0,songs-1) WHERE day=? AND user_id=?').bind(day,userId).run();return c.json({error:'The shared free Whisper allowance is used up for today. Try again after 00:00 Thailand time.'},429);}
   try{
     const words:Array<{text:string;start:number;end:number}>=[];const chunkSeconds=30;const overlapSeconds=.5;const stepSamples=(chunkSeconds-overlapSeconds)*sampleRate;
     for(let startSample=0;startSample<samples;startSample+=stepSamples){
@@ -97,7 +116,7 @@ app.post('/api/transcribe',async c=>{
     if(!words.length)throw new Error('Whisper did not return word timestamps for this audio.');
     return c.json({words,duration,model:'@cf/openai/whisper'});
   }catch(error){
-    await c.env.DB.batch([c.env.DB.prepare('UPDATE ai_usage SET seconds=MAX(0,seconds-?) WHERE day=? AND user_id=?').bind(seconds,day,userId),c.env.DB.prepare('UPDATE ai_global_usage SET seconds=MAX(0,seconds-?) WHERE day=?').bind(seconds,day)]);
+    await c.env.DB.batch([c.env.DB.prepare('UPDATE ai_usage SET seconds=MAX(0,seconds-?) WHERE day=? AND user_id=?').bind(seconds,day,userId),c.env.DB.prepare('UPDATE ai_global_usage SET seconds=MAX(0,seconds-?) WHERE day=?').bind(seconds,day),...(!owner?[c.env.DB.prepare('UPDATE whisper_track_usage SET songs=MAX(0,songs-1) WHERE day=? AND user_id=?').bind(day,userId)]:[])]);
     console.error('Whisper transcription failed',error);return c.json({error:error instanceof Error?error.message:'Whisper transcription failed'},502);
   }
 });
@@ -105,11 +124,13 @@ app.post('/api/transcribe',async c=>{
 // MCP clients authenticate with the same per-user key shown once at account creation.
 app.use('/mcp/*',async(c,next)=>{
   const bearer=c.req.header('Authorization');if(!bearer?.startsWith('Bearer '))return c.json({error:'Account API key required'},401);
+  if(!await isOwner(c,bearer.slice(7)))return c.json({error:'MCP access is available to the site owner only'},403);
   const user=await accountForKey(c.env.DB,bearer.slice(7));
   if(!user)return c.json({error:'Invalid account API key'},401);c.set('userId',user.id);await next();
 });
 app.use('/mcp',async(c,next)=>{
   const bearer=c.req.header('Authorization');if(!bearer?.startsWith('Bearer '))return c.json({error:'Account API key required'},401);
+  if(!await isOwner(c,bearer.slice(7)))return c.json({error:'MCP access is available to the site owner only'},403);
   const user=await accountForKey(c.env.DB,bearer.slice(7));
   if(!user)return c.json({error:'Invalid account API key'},401);c.set('userId',user.id);await next();
 });
@@ -144,5 +165,5 @@ app.post('/mcp',async c=>{
   if(Array.isArray(input)){if(!input.length||input.length>50)return c.json({jsonrpc:'2.0',id:null,error:{code:-32600,message:'Invalid batch'}},400);const out=[];for(const item of input){const result=await rpcMessage(item,call);if(result)out.push(result);}return out.length?c.json(out):new Response(null,{status:202});}
   const result=await rpcMessage(input,call);return result?c.json(result):new Response(null,{status:202});
 });
-app.get('/',c=>c.json({status:'Lyrics Visualizer MCP API',accountRegistration:'/api/account',mcp:'/mcp'}));
+app.get('/',c=>c.json({status:'Lyrics Visualizer API',accountRegistration:'/api/account'}));
 export default app;

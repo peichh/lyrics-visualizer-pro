@@ -1,5 +1,5 @@
 import type { TextStyle } from './App';
-import { lyricWords } from './lyric-words.mjs';
+import { lyricWords, splitLyricTokens } from './lyric-words.mjs';
 
 export type LyricFrame = {
   text: string;
@@ -59,7 +59,7 @@ export function drawLyricFrame(ctx: CanvasRenderingContext2D, width: number, hei
   const lineLimit = Math.max(1, maxWidth - 2 * padding);
   // Wrap on language-aware word boundaries so a word keeps one timing slot
   // and highlights stay in reading order from the first row to the next.
-  for (const token of words(text)) {
+  for (const token of splitLyricTokens(text)) {
     if (token.includes('\n')) {
       const pieces = token.split('\n');
       for (let i = 0; i < pieces.length; i++) {

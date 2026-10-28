@@ -27,6 +27,7 @@ async function post(endpoint: string, token: string, message: RpcMessage, connec
   const response = await fetch(endpoint, {
     method: 'POST', headers,
     body: JSON.stringify({ ...message, ...(Object.keys(params).length ? { params } : {}) }),
+    credentials: 'omit', redirect: 'error', signal: AbortSignal.timeout(30_000),
   });
   const session = response.headers.get('Mcp-Session-Id');
   if (session) connection.sessionId = session;

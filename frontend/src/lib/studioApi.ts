@@ -33,6 +33,7 @@ export class StudioApi {
     const body=await response.json().catch(()=>null);if(!response.ok)throw new StudioApiError(body?.error||`Account creation failed (${response.status})`,response.status);if(!body?.apiKey)throw new StudioApiError('The account service returned an invalid response',502);return body as AccountCredentials;
   }
   listProjects() { return this.json<CloudProject[]>('/api/projects'); }
+  accountInfo() { return this.json<{isOwner:boolean}>('/api/account/me'); }
   createProject(project: Omit<CloudProject,'id'>) { return this.json<CloudProject>('/api/projects','POST',project); }
   saveProject(project: CloudProject) { return this.json<CloudProject>(`/api/projects/${encodeURIComponent(project.id)}`,'PUT',project); }
   listProposals(projectId: string) { return this.json<{proposals:AIProposal[]}>(`/api/proposals?projectId=${encodeURIComponent(projectId)}`); }
