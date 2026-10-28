@@ -1,0 +1,15 @@
+import assert from 'node:assert/strict';
+import {rpcMessage} from './mcp.ts';
+let calls=0;
+const call=async(name,args)=>{calls++;assert.equal(name,'get_project');return {id:args.projectId};};
+const rpc=(method,params)=>rpcMessage({jsonrpc:'2.0',id:1,method,params},call);
+assert.equal((await rpc('initialize',{})).result.protocolVersion,'2025-03-26');
+assert.equal(await rpcMessage({jsonrpc:'2.0',method:'notifications/initialized'},call),null);
+const tools=(await rpc('tools/list')).result.tools;
+assert.equal(tools.some(t=>/approve|update_timeline/.test(t.name)),false);
+assert.equal((await rpc('tools/call',{name:'get_project',arguments:{projectId:'p'}})).result.content[0].text,'{"id":"p"}');
+assert.equal((await rpc('tools/call',{name:'approve_proposal'})).error.code,-32602);
+assert.equal(calls,1);
+assert.equal((await rpc('unknown')).error.code,-32601);
+assert.equal((await rpcMessage(null,call)).error.code,-32600);
+console.log('MCP lifecycle and tool boundaries passed');

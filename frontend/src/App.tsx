@@ -1,3 +1,4 @@
+import { CloudPanel } from "./CloudPanel";
 import { parseTimestampedLyrics } from "./lyrics-parser.mjs";
 import { drawGrain, drawLyricFrame } from './lyric-renderer';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -210,7 +211,7 @@ export default function App() {
   const [selectedBg, setSelectedBg] = useState<string | null>(null);
   const [ts, setTs] = useState<TextStyle>(DEFAULT_STYLE);
   const [aspect, setAspect] = useState<Aspect>("16:9");
-  const [tab, setTab] = useState<"text" | "background" | "presets">("text");
+  const [tab, setTab] = useState<"text" | "background" | "presets" | "cloud">("text");
   const [safeArea, setSafeArea] = useState(false);
   const [loopPreview, setLoopPreview] = useState(true);
   const [bgFade, setBgFade] = useState(0.8);
@@ -878,11 +879,17 @@ export default function App() {
         {/* RIGHT — independent scroll, sticky tabs */}
         <aside className="studio-sidebar flex w-[380px] shrink-0 flex-col overflow-hidden border-l border-[var(--border)] bg-[var(--surface)] max-lg:w-[320px]">
           <div className="sticky top-0 z-10 flex shrink-0 border-b border-[var(--border)] bg-[var(--surface)]">
-            {([["text", "Text · ตัวอักษร", Type], ["background", "Background · พื้นหลัง", Layers], ["presets", "Presets · พรีเซ็ต", Sparkles]] as const).map(([k, l, Icon]) => (
+            {([["text", "Text · ตัวอักษร", Type], ["background", "Background · พื้นหลัง", Layers], ["presets", "Presets · พรีเซ็ต", Sparkles], ["cloud", "Cloud · AI", Check]] as const).map(([k, l, Icon]) => (
               <button key={k} onClick={() => setTab(k)} className={`flex flex-1 items-center justify-center gap-1.5 px-2 py-2.5 text-[11px] font-bold ${tab === k ? "bg-[var(--accent-soft)] text-white shadow-[inset_0_-2px_0_var(--accent)]" : "text-[var(--muted)] hover:text-white"}`}><Icon className="h-3.5 w-3.5" />{l}</button>
             ))}
           </div>
           <div className="thin-scroll min-h-0 flex-1 space-y-4 overflow-y-auto overflow-x-hidden p-3.5">
+            {tab === "cloud" && <CloudPanel snapshot={() => ({title: "Lyrics Visualizer Project", revision: 0, lyrics, ts, aspect, bgFade, seqMode, loopPreview})} restore={project => {
+              pushHistory(); audioRef.current?.pause(); if (audioRef.current) audioRef.current.currentTime = 0; setLyrics(project.lyrics); setCurrentTime(0); setPlaying(false);
+              if (project.ts && typeof project.ts === "object") setTs({...DEFAULT_STYLE, ...project.ts});
+              if (project.aspect === "16:9" || project.aspect === "9:16" || project.aspect === "1:1") setAspect(project.aspect);
+              setLyricSource("Cloud project");
+            }} />}
             {tab === "text" && (<>
               <div>
                 <div className="mb-2 flex items-center justify-between"><p className={label}>Font · ฟอนต์ — เห็นตัวอย่างก่อนเลือก</p><span className="mono text-[10px] text-[var(--accent)]">{ts.fontFamily}</span></div>

@@ -1,3 +1,4 @@
+import { rpcMessage } from './mcp';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { authorized, proposalRoutes } from './proposalRoutes';
@@ -22,6 +23,40 @@ app.use('/mcp/*', async (c, next) => {
 app.use('/api/projects*', async (c, next) => {
   if (!await authorized(c.req.header('Authorization'), c.env.OWNER_TOKEN)) return c.json({error:'Authentication required'}, 401);
   await next();
+});
+
+app.use('/mcp', async (c, next) => {
+  const origin=c.req.header('Origin');
+  if(origin && origin!==c.env.FRONTEND_URL)return c.json({error:'Origin not allowed'},403);
+  const header=c.req.header('Authorization');
+  if(!await authorized(header,c.env.AI_TOKEN) && !await authorized(header,c.env.OWNER_TOKEN))return c.json({error:'Authentication required'},401);
+  await next();
+});
+app.get('/mcp',()=>new Response(null,{status:405,headers:{Allow:'POST'}}));
+app.post('/mcp',async c=>{
+  if(!c.req.header('Content-Type')?.includes('application/json'))return c.json({error:'JSON required'},415);
+  let input;
+  try{input=await c.req.json();}catch{return c.json({jsonrpc:'2.0',id:null,error:{code:-32700,message:'Parse error'}},400);}
+  const call=async(name:string,args:Record<string,unknown>)=>{
+    if(name==='list_projects'){
+      const {results}=await c.env.DB.prepare('SELECT data FROM projects').all();
+      return results.map((row:any)=>{const p=JSON.parse(row.data);return {id:p.id,title:p.title,revision:p.revision};});
+    }
+    if(typeof args.projectId!=='string'||args.projectId.length>200)throw new Error('Valid project ID required');
+    if(name==='get_project'){
+      const row=await c.env.DB.prepare('SELECT data FROM projects WHERE id = ?').bind(args.projectId).first<{data:string}>();
+      if(!row)throw new Error('Project not found');return JSON.parse(row.data);
+    }
+    const response=await app.request('https://internal/api/proposals',{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${c.env.AI_TOKEN}`},body:JSON.stringify(args)},c.env);
+    const body=await response.json() as any;
+    if(!response.ok)throw new Error(body.error||'Proposal failed');return body;
+  };
+  if(Array.isArray(input)){
+    if(!input.length||input.length>50)return c.json({jsonrpc:'2.0',id:null,error:{code:-32600,message:'Invalid batch'}},400);
+    const results=[];for(const message of input){const result=await rpcMessage(message,call);if(result)results.push(result);}
+    return results.length?c.json(results):new Response(null,{status:202});
+  }
+  const result=await rpcMessage(input,call);return result?c.json(result):new Response(null,{status:202});
 });
 
 app.get('/mcp/tools', (c) => c.json({
