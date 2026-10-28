@@ -172,9 +172,12 @@ export function drawLyricFrame(ctx: CanvasRenderingContext2D, width: number, hei
     } else if (s.animation === 'Karaoke Fill') {
       paint(full, lineX, lineY);
       let cursor = lineX;
-      for (const word of words(full)) {
-        const wordWidth = measure(word);
-        if (!word.trim()) { cursor += wordWidth; continue; }
+      // Keep whitespace in the drawing cursor. `lyricWords()` intentionally
+      // removes spaces for timing, but using it for placement made every
+      // highlighted word shift left and pile on top of the previous words.
+      for (const token of splitLyricTokens(full)) {
+        const wordWidth = measure(token);
+        if (!token.trim()) { cursor += wordWidth; continue; }
         const timedWord = wordTimings?.[wordIndex];
         const audioTime = frame.currentTime ?? frame.elapsed;
         const phase = timedWord
@@ -182,7 +185,7 @@ export function drawLyricFrame(ctx: CanvasRenderingContext2D, width: number, hei
           : clamp(progress * wordCount - wordIndex);
         if (phase > 0) {
           ctx.save(); ctx.beginPath(); ctx.rect(cursor, lineY - lineHeight, wordWidth * phase, lineHeight * 2); ctx.clip();
-          ctx.fillStyle = s.glowOn ? s.glowColor : '#C4B5FD'; ctx.shadowBlur = 0; ctx.fillText(word, cursor, lineY); ctx.restore();
+          ctx.fillStyle = s.glowOn ? s.glowColor : '#C4B5FD'; ctx.shadowBlur = 0; ctx.fillText(token, cursor, lineY); ctx.restore();
         }
         cursor += wordWidth; wordIndex++;
       }
