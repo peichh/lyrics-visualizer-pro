@@ -8,7 +8,7 @@ export class StudioApiError extends Error {
 /** Token stays in the caller's memory; it is never included in URLs or logs. */
 export class StudioApi {
   private origin: string;
-  constructor(origin: string, private token: string, private request: typeof fetch = fetch) {
+  constructor(origin: string, private token: string | undefined, private request: typeof fetch = fetch) {
     const url = new URL(origin);
     if (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost','127.0.0.1'].includes(url.hostname))) throw new Error('Cloud API requires HTTPS');
     if (url.username || url.password || url.search || url.hash) throw new Error('Invalid API URL');
@@ -16,8 +16,8 @@ export class StudioApi {
   }
   private async json<T>(path: string, method = 'GET', value?: unknown): Promise<T> {
     const response = await this.request(this.origin + path, {
-      method, credentials:'omit', redirect:'error', signal:AbortSignal.timeout(30000),
-      headers:{Authorization:`Bearer ${this.token}`, ...(value === undefined ? {} : {'Content-Type':'application/json'})},
+      method, credentials:'include', redirect:'error', signal:AbortSignal.timeout(30000),
+      headers:{...(this.token ? {Authorization:`Bearer ${this.token}`} : {}), ...(value === undefined ? {} : {'Content-Type':'application/json'})},
       body:value === undefined ? undefined : JSON.stringify(value),
     });
     const body = await response.json().catch(() => null);

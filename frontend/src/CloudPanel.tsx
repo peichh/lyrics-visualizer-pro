@@ -1,10 +1,13 @@
 import React, {useState} from 'react';
+
+const DEFAULT_API_URL = import.meta.env.VITE_STUDIO_API_URL || (typeof window !== 'undefined' ? window.location.origin : '');
+const DEFAULT_OWNER_TOKEN = import.meta.env.VITE_STUDIO_OWNER_TOKEN || undefined;
 import {StudioApi, type CloudProject, type AIProposal} from './lib/studioApi';
 
 type Props = {snapshot:()=>Omit<CloudProject,'id'>; restore:(project:CloudProject)=>void};
 export function CloudPanel({snapshot,restore}:Props) {
-  const [origin,setOrigin]=useState('');
-  const [token,setToken]=useState('');
+  const [origin,setOrigin]=useState(DEFAULT_API_URL);
+  const [token,setToken]=useState(DEFAULT_OWNER_TOKEN || '');
   const [client,setClient]=useState<StudioApi|null>(null);
   const [projects,setProjects]=useState<CloudProject[]>([]);
   const [active,setActive]=useState<CloudProject|null>(null);
@@ -26,11 +29,11 @@ export function CloudPanel({snapshot,restore}:Props) {
     <h2 className="mono text-sm">CLOUD / AI REVIEW</h2>
     <p className="text-xs">AI เสนอการแก้ไขได้ พี่ตรวจรายละเอียดและกดยืนยันก่อนใช้กับงาน</p>
     {!client?<form className="space-y-3" onSubmit={e=>{e.preventDefault();void run(async()=>{
-      const api=new StudioApi(origin,token);setProjects(await api.listProjects());setClient(api);setToken('');setMessage('เชื่อมต่อแล้ว เลือกงานหรือบันทึกเป็นงานใหม่');
+      const api=new StudioApi(origin,token || undefined);setProjects(await api.listProjects());setClient(api);setToken('');setMessage('เชื่อมต่อแล้ว เลือกงานหรือบันทึกเป็นงานใหม่');
     });}}>
-      <label className="block text-xs">API URL<input required type="url" value={origin} onChange={e=>setOrigin(e.target.value)} placeholder="https://your-api.workers.dev" className="mt-1 w-full border p-2"/></label>
-      <label className="block text-xs">Owner token<input required type="password" autoComplete="off" value={token} onChange={e=>setToken(e.target.value)} className="mt-1 w-full border p-2"/></label>
-      <p className="text-xs text-[var(--muted)]">เก็บรหัสเฉพาะระหว่างเปิดหน้านี้ ปิดหน้าแล้วต้องเชื่อมใหม่</p>
+      <label className="block text-xs">API URL<input required type="url" value={origin} onChange={e=>setOrigin(e.target.value)} placeholder="https://your-api.workers.dev" className="mt-1 w-full border p-2" readOnly={!!import.meta.env.VITE_STUDIO_API_URL}/></label>
+      {!DEFAULT_OWNER_TOKEN && <label className="block text-xs">Owner token<input required type="password" autoComplete="off" value={token} onChange={e=>setToken(e.target.value)} className="mt-1 w-full border p-2"/></label>}
+      <p className="text-xs text-[var(--muted)]">{DEFAULT_OWNER_TOKEN ? "เชื่อมด้วยรหัสทดสอบ" : (location.hostname.endsWith('pages.dev') ? "ระบบจะตรวจสิทธิ์ผ่าน Cloudflare Access" : "เชื่อมด้วย Cloudflare Access หรือใส่ Owner token")}</p>
       <button disabled={busy} className={button}>เชื่อมต่อ</button>
     </form>:<>
       <button disabled={busy} className={button} onClick={()=>void run(async()=>{
