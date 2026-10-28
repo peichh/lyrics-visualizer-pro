@@ -1,6 +1,6 @@
 import React, {useState} from 'react';
 
-const DEFAULT_API_URL = import.meta.env.VITE_STUDIO_API_URL || import.meta.env.VITE_BACKEND_URL || (typeof window !== 'undefined' ? window.location.origin : '');
+const DEFAULT_API_URL = import.meta.env.VITE_STUDIO_API_URL || import.meta.env.VITE_BACKEND_URL || 'https://lyrics-studio-multitenant-preview.peich.workers.dev';
 const DEFAULT_OWNER_TOKEN = import.meta.env.VITE_STUDIO_OWNER_TOKEN || undefined;
 import {StudioApi, type CloudProject, type AIProposal} from './lib/studioApi';
 

@@ -30,7 +30,7 @@ export class StudioApi {
     const url=new URL(origin);
     if(url.protocol!=='https:'&&!(url.protocol==='http:'&&['localhost','127.0.0.1'].includes(url.hostname)))throw new Error('Account creation requires HTTPS');
     const response=await fetch(url.origin+'/api/account',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:'{}'});
-    const body=await response.json();if(!response.ok)throw new StudioApiError(body?.error||'Account creation failed',response.status);return body as AccountCredentials;
+    const body=await response.json().catch(()=>null);if(!response.ok)throw new StudioApiError(body?.error||`Account creation failed (${response.status})`,response.status);if(!body?.apiKey)throw new StudioApiError('The account service returned an invalid response',502);return body as AccountCredentials;
   }
   listProjects() { return this.json<CloudProject[]>('/api/projects'); }
   createProject(project: Omit<CloudProject,'id'>) { return this.json<CloudProject>('/api/projects','POST',project); }
