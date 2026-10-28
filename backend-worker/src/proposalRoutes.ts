@@ -4,7 +4,7 @@ import { applyApprovedChanges, validateCuePatch } from './proposals';
 type ProposalBindings = { DB: D1Database; OWNER_TOKEN: string; AI_TOKEN: string };
 export const proposalRoutes = new Hono<{Bindings: ProposalBindings}>();
 
-async function authorized(header: string | undefined, token: string | undefined) {
+export async function authorized(header: string | undefined, token: string | undefined) {
   if (!token || !header?.startsWith('Bearer ')) return false;
   const digest = async (text: string) => new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)));
   const [a, b] = await Promise.all([digest(header.slice(7)), digest(token)]);

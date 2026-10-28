@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { proposalRoutes } from './proposalRoutes';
+import { authorized, proposalRoutes } from './proposalRoutes';
 
 type Bindings = { DB: D1Database; FRONTEND_URL: string; OWNER_TOKEN: string; AI_TOKEN: string; }
 const app = new Hono<{ Bindings: Bindings }>();
@@ -13,14 +13,21 @@ app.use('/*', cors({
 
 app.route('/api/proposals', proposalRoutes);
 
+app.use('/mcp/*', async (c, next) => {
+  const header = c.req.header('Authorization');
+  if (!await authorized(header, c.env.AI_TOKEN) && !await authorized(header, c.env.OWNER_TOKEN)) return c.json({error:'Authentication required'}, 401);
+  await next();
+});
+app.use('/api/projects*', async (c, next) => {
+  if (!await authorized(c.req.header('Authorization'), c.env.OWNER_TOKEN)) return c.json({error:'Authentication required'}, 401);
+  await next();
+});
+
 app.get('/mcp/tools', (c) => c.json({
   name: 'lyrics-visualizer-mcp',
   tools: [
     { name: 'get_project_state', params: ['projectId'] },
     { name: 'get_lyrics_timestamps', params: ['projectId'] },
-    { name: 'update_timeline_cue', params: ['projectId','timestamp','updates'] },
-    { name: 'set_background_transition', params: ['projectId','time_start','style','duration'] },
-    { name: 'trigger_preview_at', params: ['projectId','timestamp'] }
   ]
 }));
 
@@ -38,26 +45,12 @@ app.post('/mcp/call', async (c) => {
     return c.json({ success: true, result: p.lyrics });
   }
   if (tool === 'update_timeline_cue') {
-    const row = await c.env.DB.prepare('SELECT data FROM projects WHERE id = ?').bind(projectId).first();
-    if (!row) return c.json({ success: false, error: 'not found' });
-    const p = JSON.parse(row.data as string);
-    const cue = p.lyrics.find((l:any) => Math.abs(l.time - args.timestamp) < 1);
-    if (cue) Object.assign(cue, args.updates);
-    await c.env.DB.prepare('UPDATE projects SET data = ? WHERE id = ?').bind(JSON.stringify(p), projectId).run();
-    return c.json({ success: true, result: cue });
+    return c.json({success:false,error:'Create a proposal through /api/proposals; the owner must confirm before any edit'}, 409);
   }
   return c.json({ success: false, error: 'unknown tool' });
 });
 
-app.post('/mcp/chat', async (c) => {
-  const { message, projectId, timestamp } = await c.req.json();
-  const lower = message.toLowerCase();
-  let reply = 'รับทราบคับพี่พีช: ' + message + ' - องศากำลังปรับให้...';
-  if (lower.includes('ขวาบน')) {
-    reply = 'ปรับให้แล้วคับพี่พีช! ย้ายไปมุมขวาบน Celestial Starlight พุ่งแรงขึ้น';
-  }
-  return c.json({ reply, seek: { timestamp: timestamp || 84.5 } });
-});
+app.post('/mcp/chat', c => c.json({error:'Chat provider is not configured. No project changes were made.'}, 503));
 
 app.get('/api/projects', async (c) => {
   const { results } = await c.env.DB.prepare('SELECT data FROM projects').all();
