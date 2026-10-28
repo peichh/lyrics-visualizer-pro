@@ -255,7 +255,8 @@ export default function App() {
   const [selectedBg, setSelectedBg] = useState<string | null>(null);
   const [ts, setTs] = useState<TextStyle>(DEFAULT_STYLE);
   const [aspect, setAspect] = useState<Aspect>("16:9");
-  const [tab, setTab] = useState<"text" | "background" | "presets" | "cloud">("text");
+  const [tab, setTab] = useState<"media" | "text" | "background" | "presets" | "cloud">("text");
+  const [mobileView, setMobileView] = useState<"stage" | "tools">("stage");
   const [safeArea, setSafeArea] = useState(false);
   const [loopPreview, setLoopPreview] = useState(true);
   const [bgFade, setBgFade] = useState(0.8);
@@ -785,9 +786,13 @@ export default function App() {
         {notice && <div className="border-t border-[var(--border)] px-4 py-1.5"><p className="flex items-center gap-2 text-[11px] text-[var(--muted)]"><Sparkles className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />{notice}</p></div>}
       </header>
 
-      <main className="flex min-h-0 flex-1 overflow-hidden">
+      <div className="flex h-10 shrink-0 items-center gap-1 border-b border-[var(--border)] bg-[var(--surface)] px-3 xl:hidden" aria-label="Mobile workspace view">
+        <button onClick={() => setMobileView("stage")} aria-pressed={mobileView === "stage"} className={`flex-1 rounded-md px-3 py-1.5 text-xs font-bold ${mobileView === "stage" ? "bg-[var(--accent)] text-white" : "text-[var(--muted)]"}`}>◫ Preview · เวที</button>
+        <button onClick={() => setMobileView("tools")} aria-pressed={mobileView === "tools"} className={`flex-1 rounded-md px-3 py-1.5 text-xs font-bold ${mobileView === "tools" ? "bg-[var(--accent)] text-white" : "text-[var(--muted)]"}`}>☷ Edit · เครื่องมือ</button>
+      </div>
+      <main className="flex min-h-0 flex-1 overflow-hidden max-xl:flex-col">
         {/* LEFT — independent scroll */}
-        <aside className="studio-sidebar thin-scroll hidden w-[360px] shrink-0 overflow-y-auto overflow-x-hidden border-r border-[var(--border)] lg:block">
+        <aside className="studio-sidebar thin-scroll hidden w-[360px] shrink-0 overflow-y-auto overflow-x-hidden border-r border-[var(--border)] xl:block">
           <div className="space-y-3 p-3">
             <section className={`${card} p-3.5`}>
               <p className={`${label} mb-2.5 flex items-center gap-2`}><Music2 className="h-3.5 w-3.5" /> Song · เพลง</p>
@@ -879,7 +884,7 @@ export default function App() {
         </aside>
 
         {/* CENTER — fixed stage, never scrolls; timeline pinned at bottom */}
-        <section className="studio-center relative flex min-w-0 flex-1 flex-col overflow-hidden">
+        <section className={`studio-center relative min-h-0 min-w-0 flex-1 flex-col overflow-hidden ${mobileView === "stage" ? "flex max-xl:flex" : "hidden max-xl:hidden"} xl:flex`}>
           <div className="flex h-12 shrink-0 items-center gap-2 border-b border-[var(--border)] px-3.5">
             <MonitorPlay className="h-4 w-4 shrink-0 text-[var(--accent)]" />
             <span className={`${label} shrink-0`}>Stage</span>
@@ -988,13 +993,62 @@ export default function App() {
         </section>
 
         {/* RIGHT — independent scroll, sticky tabs */}
-        <aside className="studio-sidebar flex w-[380px] shrink-0 flex-col overflow-hidden border-l border-[var(--border)] bg-[var(--surface)] max-lg:w-[320px]">
+        <aside className={`studio-sidebar min-h-0 flex-col overflow-hidden border-l border-[var(--border)] bg-[var(--surface)] xl:w-[380px] xl:shrink-0 max-xl:w-full max-xl:border-l-0 max-xl:border-t ${mobileView === "tools" ? "flex max-xl:flex" : "hidden max-xl:hidden"} xl:flex`}>
           <div className="sticky top-0 z-10 flex shrink-0 border-b border-[var(--border)] bg-[var(--surface)]">
-            {([["text", "Text · ตัวอักษร", Type], ["background", "Background · พื้นหลัง", Layers], ["presets", "Presets · พรีเซ็ต", Sparkles], ["cloud", "Cloud · AI", Check]] as const).map(([k, l, Icon]) => (
-              <button key={k} onClick={() => setTab(k)} className={`flex flex-1 items-center justify-center gap-1.5 px-2 py-2.5 text-[11px] font-bold ${tab === k ? "bg-[var(--accent-soft)] text-white shadow-[inset_0_-2px_0_var(--accent)]" : "text-[var(--muted)] hover:text-white"}`}><Icon className="h-3.5 w-3.5" />{l}</button>
+            {([["media", "Media · สื่อ", Music2], ["text", "Text · ตัวอักษร", Type], ["background", "Background · พื้นหลัง", Layers], ["presets", "Presets · พรีเซ็ต", Sparkles], ["cloud", "Cloud · AI", Check]] as const).map(([k, l, Icon]) => (
+              <button key={k} onClick={() => setTab(k)} className={`flex flex-1 items-center justify-center gap-1.5 px-1.5 py-2.5 text-[10px] font-bold ${tab === k ? "bg-[var(--accent-soft)] text-white shadow-[inset_0_-2px_0_var(--accent)]" : "text-[var(--muted)] hover:text-white"}`}><Icon className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{l}</span></button>
             ))}
           </div>
           <div className="thin-scroll min-h-0 flex-1 space-y-4 overflow-y-auto overflow-x-hidden p-3.5">
+            {tab === "media" && <div className="space-y-3">
+              <section className={`${card} p-3.5`}>
+                <p className={`${label} mb-2.5 flex items-center gap-2`}><Music2 className="h-3.5 w-3.5" /> Song · เพลง</p>
+                <label className="block cursor-pointer rounded-xl border border-dashed border-[var(--border)] bg-[var(--surface2)] p-3 text-center transition hover:border-[var(--accent)]" title={titleAttr("Upload MP3/WAV", "อัพโหลดไฟล์เพลง")}>
+                  <Upload className="mx-auto mb-1 h-5 w-5 text-[var(--accent)]" />
+                  <span className="block truncate text-xs font-semibold">{audioName || "Drop your song here · ลากเพลงมาวางที่นี่"}</span>
+                  <span className={label}>{audioName ? `${fmt(duration)} · loaded` : "MP3 / WAV · click to browse"}</span>
+                  <input type="file" accept=".mp3,.wav,audio/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) onAudio(f); }} />
+                </label>
+              </section>
+              <section className={`${card} p-3.5`}>
+                <p className={`${label} mb-2.5 flex items-center gap-2`}><FileText className="h-3.5 w-3.5" /> Lyrics · เนื้อเพลง</p>
+                <label className="block cursor-pointer rounded-xl border border-dashed border-[var(--border)] bg-[var(--surface2)] p-3 text-center transition hover:border-[var(--accent)]" title={titleAttr("Upload .lrc / .txt / .srt", "อัพโหลดไฟล์เนื้อเพลง")}>
+                  <FileText className="mx-auto mb-1 h-5 w-5 text-[var(--accent)]" />
+                  <span className="block truncate text-xs font-semibold">{lyricSource || "Upload .lrc / .srt · อัพโหลดเนื้อเพลง"}</span>
+                  <span className={label}>{lyrics.length ? `${lyrics.length} lines` : "Timed lyrics · เนื้อเพลงมีเวลา"}</span>
+                  <input type="file" accept=".lrc,.txt,.srt,text/plain" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void onLyricsFile(f); }} />
+                </label>
+                <button onClick={() => void transcribeAudio()} disabled={!audioFile || transcribing} className={`${btnGhost} mt-2 w-full justify-center disabled:opacity-40`} title={titleAttr("Use Whisper to detect words and their timing", "ใช้ Whisper จับคำและเวลาเพื่อทำคาราโอเกะระดับคำ")}>
+                  {transcribing ? `Whisper ${transcribeProgress}%…` : "✦ Whisper · จับเวลาเนื้อเพลง"}
+                </button>
+                <textarea value={pasteText} onChange={(e) => setPasteText(e.target.value)} rows={3} placeholder={"Paste lyrics here, one line per row…\nวางเนื้อเพลงตรงนี้ บรรทัดละท่อน…"} className="mt-2 w-full resize-y rounded-xl border border-[var(--border)] bg-[var(--surface2)] p-2.5 text-xs outline-none placeholder:text-zinc-600 focus:border-[var(--accent)]" />
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <button onClick={autoTimestamp} className={btnGhost} title={titleAttr("Auto-timestamp every 3 seconds", "ใส่เวลาอัตโนมัติทุก 3 วิ")}><Timer className="h-3.5 w-3.5" /> Auto-time 3s</button>
+                  <button onClick={loadDemo} className={btnGhost}><Sparkles className="h-3.5 w-3.5" /> Demo lyrics</button>
+                  <button onClick={spreadEvenly} disabled={!lyrics.length} className={`${btnGhost} disabled:opacity-40`}>Spread evenly</button>
+                  <button onClick={exportLrc} disabled={!lyrics.length} className={`${btnGhost} disabled:opacity-40`}><FileDown className="h-3.5 w-3.5" /> Export LRC</button>
+                </div>
+                {lyrics.length > 0 && <div className="thin-scroll mt-3 max-h-52 space-y-1 overflow-y-auto pr-1">
+                  {lyrics.map((l) => <div key={l.id} className={`flex items-center gap-1.5 rounded-lg border px-2 py-1 ${lyrics[activeIdx]?.id === l.id ? "border-[var(--accent)] bg-[var(--accent-soft)]" : "border-transparent hover:bg-[var(--surface2)]"}`}>
+                    <input defaultValue={fmtFull(l.time)} key={l.id + l.time} onBlur={(e) => { const t = parseTimeInput(e.target.value, l.time); pushHistory(); setLyrics((prev) => prev.map((x) => x.id === l.id ? { ...x, time: t, wordTimings: x.wordTimings?.map(word => ({ ...word, start: word.start + t - l.time, end: word.end + t - l.time })) } : x).sort((a, b) => a.time - b.time)); }} className="mono w-[66px] shrink-0 rounded bg-black/40 px-1 py-1 text-[10px] text-[var(--accent)] outline-none" aria-label={`Start time ${l.text}`} />
+                    <input value={l.text} onChange={(e) => setLyrics((prev) => prev.map((x) => x.id === l.id ? { ...x, text: e.target.value, wordTimings: undefined } : x))} onClick={() => seek(l.time)} className="min-w-0 flex-1 bg-transparent py-1 text-xs outline-none" aria-label={`Lyric ${l.text}`} />
+                    <button onClick={() => { pushHistory(); setLyrics((prev) => prev.filter((x) => x.id !== l.id)); }} className="shrink-0 px-1 text-zinc-500 hover:text-red-400" title={titleAttr("Delete line", "ลบบรรทัด")}><Trash2 className="h-3 w-3" /></button>
+                  </div>)}
+                  <button onClick={() => { pushHistory(); setLyrics((prev) => [...prev, { id: nid("l"), time: Math.round(currentTime * 100) / 100, text: "New line · ท่อนใหม่" }].sort((a, b) => a.time - b.time)); }} className="flex w-full items-center justify-center gap-1 rounded-lg border border-dashed border-[var(--border)] py-1.5 text-[11px] font-semibold text-[var(--muted)] hover:border-[var(--accent)] hover:text-white"><Plus className="h-3 w-3" /> Add line at playhead · เพิ่มท่อน</button>
+                </div>}
+              </section>
+              <section className={`${card} p-3.5`}>
+                <p className={`${label} mb-2.5 flex items-center gap-2`}><ImageIcon className="h-3.5 w-3.5" /> Backgrounds · พื้นหลัง</p>
+                <label className="block cursor-pointer rounded-xl border border-dashed border-[var(--border)] bg-[var(--surface2)] p-3 text-center transition hover:border-[var(--accent)]" title={titleAttr("Add images, videos or GIFs", "เพิ่มรูป วิดีโอ หรือ GIF")}>
+                  <Film className="mx-auto mb-1 h-5 w-5 text-[var(--accent)]" />
+                  <span className="block text-xs font-semibold">Add photos / video / GIF · เพิ่มพื้นหลัง</span>
+                  <span className={label}>{backgrounds.length ? `${backgrounds.length} clips · add more` : "jpg png webp · mp4 mov webm · gif"}</span>
+                  <input type="file" accept="image/*,video/*,.gif" multiple className="hidden" onChange={(e) => { if (e.target.files?.length) onBackgrounds(e.target.files); }} />
+                </label>
+                {backgrounds.length > 0 && <div className="mt-2 flex flex-wrap gap-1">{backgrounds.map((b, i) => <button key={b.id} onClick={() => { setSelectedBg(b.id); setTab("background"); }} className={`max-w-full truncate rounded border px-2 py-1 text-[10px] ${selectedBg === b.id ? "border-[var(--accent)] bg-[var(--accent-soft)]" : "border-[var(--border)]"}`}>{i + 1}. {b.name}</button>)}</div>}
+              </section>
+              <p className="px-1 text-center text-[11px] leading-relaxed text-[var(--muted)]">เลือกไฟล์แล้วแก้จังหวะเนื้อเพลงต่อได้จากไทม์ไลน์ · Selected media stays in this browser session.</p>
+            </div>}
             {tab === "cloud" && <CloudPanel snapshot={() => ({title: "Lyrics Visualizer Project", revision: 0, lyrics, ts, aspect, bgFade, seqMode, loopPreview})} restore={project => {
               pushHistory(); audioRef.current?.pause(); if (audioRef.current) audioRef.current.currentTime = 0; setLyrics(project.lyrics); setCurrentTime(0); setPlaying(false);
               if (project.ts && typeof project.ts === "object") setTs({...DEFAULT_STYLE, ...project.ts});
