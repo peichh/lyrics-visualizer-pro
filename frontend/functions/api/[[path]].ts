@@ -36,8 +36,8 @@ export const onRequest: PagesFunction<Env> = async ({request,env}) => {
   const url=new URL(request.url);
   const target=new URL(url.pathname.replace(/^\/api\//,'/api/'), 'https://lyrics-studio-preview-api.peich.workers.dev');
   target.search=url.search;
-  const headers=new Headers(request.headers);
-  headers.delete('cookie');
-  headers.set('Authorization',`Bearer ${env.STUDIO_OWNER_TOKEN}`);
-  return fetch(new Request(target,request));
+  const proxyRequest=new Request(target,request);
+  proxyRequest.headers.delete('cookie');
+  proxyRequest.headers.set('Authorization',`Bearer ${env.STUDIO_OWNER_TOKEN}`);
+  return fetch(proxyRequest);
 };
