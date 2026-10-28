@@ -1,3 +1,5 @@
+import { lyricWords } from './lyric-words.mjs';
+
 /**
  * Attach Whisper word boundaries to the supplied lyric lines while preserving
  * their text and line start times. Whisper can mishear sung words, so matching
@@ -7,10 +9,8 @@ export function alignLyricWords(lyrics, whisperWords) {
   const tokens = [];
   const lineTokens = lyrics.map((line, lineIndex) => {
     const found = [];
-    const matcher = /\S+/gu;
-    let match;
-    while ((match = matcher.exec(line.text))) {
-      const token = { text: match[0], lineIndex, timing: null };
+    for (const word of lyricWords(line.text)) {
+      const token = { text: word, lineIndex, timing: null };
       tokens.push(token);
       found.push(token);
     }

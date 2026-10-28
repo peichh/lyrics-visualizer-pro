@@ -1,4 +1,5 @@
 import type { TextStyle } from './App';
+import { lyricWords } from './lyric-words.mjs';
 
 export type LyricFrame = {
   text: string;
@@ -18,10 +19,7 @@ const units = (text: string): string[] => {
   return Array.from(text);
 };
 const words = (text: string): string[] => {
-  if (typeof Intl.Segmenter === 'function') {
-    return [...new Intl.Segmenter(undefined, {granularity:'word'}).segment(text)].map(item => item.segment);
-  }
-  return text.split(/(\s+)/).filter(Boolean);
+  return lyricWords(text);
 };
 
 /** Draw the same deterministic lyric frame in the editor and in the export. */
@@ -58,12 +56,32 @@ export function drawLyricFrame(ctx: CanvasRenderingContext2D, width: number, hei
   const graphemes = units(text);
   const lines: string[] = [];
   let line = '';
-  // Grapheme wrapping keeps Thai vowel marks and emoji attached to their base characters.
-  for (const char of graphemes) {
-    if (char === '\n') { lines.push(line); line = ''; continue; }
-    if (line && measure(line + char) > Math.max(1, maxWidth - 2 * padding)) {
-      lines.push(line.trimEnd()); line = char.trimStart();
-    } else line += char;
+  const lineLimit = Math.max(1, maxWidth - 2 * padding);
+  // Wrap on language-aware word boundaries so a word keeps one timing slot
+  // and highlights stay in reading order from the first row to the next.
+  for (const token of words(text)) {
+    if (token.includes('\n')) {
+      const pieces = token.split('\n');
+      for (let i = 0; i < pieces.length; i++) {
+        const piece = pieces[i];
+        if (piece) {
+          if (line && measure(line + piece) > lineLimit) { lines.push(line.trimEnd()); line = piece.trimStart(); }
+          else line += piece;
+        }
+        if (i < pieces.length - 1) { lines.push(line.trimEnd()); line = ''; }
+      }
+      continue;
+    }
+    if (/^\s+$/u.test(token)) { if (line) line += token; continue; }
+    if (line && measure(line + token) > lineLimit) { lines.push(line.trimEnd()); line = token.trimStart(); }
+    else line += token;
+    // A single long token still wraps by grapheme without breaking Thai marks.
+    while (measure(line) > lineLimit) {
+      let splitAt = 0;
+      while (splitAt < units(line).length - 1 && measure(units(line).slice(0, splitAt + 1).join('')) <= lineLimit) splitAt++;
+      if (splitAt < 1) break;
+      const current = units(line); lines.push(current.slice(0, splitAt).join('').trimEnd()); line = current.slice(splitAt).join('');
+    }
   }
   if (line || !lines.length) lines.push(line);
   const blockHeight = lines.length * lineHeight;
@@ -151,6 +169,23 @@ export function drawLyricFrame(ctx: CanvasRenderingContext2D, width: number, hei
         ctx.restore();
         cursor += charWidth;
       }
+    } else if (s.animation === 'Karaoke Fill') {
+      paint(full, lineX, lineY);
+      let cursor = lineX;
+      for (const word of words(full)) {
+        const wordWidth = measure(word);
+        if (!word.trim()) { cursor += wordWidth; continue; }
+        const timedWord = wordTimings?.[wordIndex];
+        const audioTime = frame.currentTime ?? frame.elapsed;
+        const phase = timedWord
+          ? clamp((audioTime - timedWord.start) / Math.max(.08, timedWord.end - timedWord.start))
+          : clamp(progress * wordCount - wordIndex);
+        if (phase > 0) {
+          ctx.save(); ctx.beginPath(); ctx.rect(cursor, lineY - lineHeight, wordWidth * phase, lineHeight * 2); ctx.clip();
+          ctx.fillStyle = s.glowOn ? s.glowColor : '#C4B5FD'; ctx.shadowBlur = 0; ctx.fillText(word, cursor, lineY); ctx.restore();
+        }
+        cursor += wordWidth; wordIndex++;
+      }
     } else if (s.animation === 'Word-by-Word Pop' || s.animation === 'Bounce Pop' || s.animation === 'Kinetic Slide') {
       let cursor = lineX;
       for (const word of words(full)) {
@@ -182,10 +217,6 @@ export function drawLyricFrame(ctx: CanvasRenderingContext2D, width: number, hei
       }
     } else {
       paint(visible, lineX, lineY);
-      if (s.animation === 'Karaoke Fill') {
-        ctx.save(); ctx.beginPath(); ctx.rect(lineX, lineY - lineHeight, lineWidth * progress, lineHeight * 2); ctx.clip();
-        ctx.fillStyle = s.glowOn ? s.glowColor : '#C4B5FD'; ctx.shadowBlur = 0; ctx.fillText(full, lineX, lineY); ctx.restore();
-      }
       if (s.animation === 'Typewriter + Cursor' && Math.floor(time * 2) % 2 === 0 && textProgressCount >= seen && textProgressCount <= seen + lineUnits.length) ctx.fillText('|', lineX + measure(visible), lineY);
     }
     seen += lineUnits.length;

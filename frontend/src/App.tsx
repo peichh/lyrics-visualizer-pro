@@ -3,6 +3,7 @@ import { parseTimestampedLyrics } from "./lyrics-parser.mjs";
 import { drawGrain, drawLyricFrame } from './lyric-renderer';
 import { prepareWhisperAudio } from './audioWav';
 import { alignLyricWords } from './word-align.mjs';
+import { splitLyricTokens } from './lyric-words.mjs';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Upload, FileText, Play, Pause, Sparkles, Download, Music2, Image as ImageIcon, Film,
@@ -256,7 +257,8 @@ export default function App() {
   const [ts, setTs] = useState<TextStyle>(DEFAULT_STYLE);
   const [aspect, setAspect] = useState<Aspect>("16:9");
   const [tab, setTab] = useState<"media" | "text" | "background" | "presets" | "cloud">("text");
-  const [mobileView, setMobileView] = useState<"stage" | "tools">("stage");
+  const [mobileView, setMobileView] = useState<"stage" | "tools" | "export">("stage");
+  const [showHeaderExportTools, setShowHeaderExportTools] = useState(true);
   const [safeArea, setSafeArea] = useState(false);
   const [loopPreview, setLoopPreview] = useState(true);
   const [bgFade, setBgFade] = useState(0.8);
@@ -666,7 +668,19 @@ export default function App() {
   );
 
   const displayText = ts.uppercase && activeLyric ? activeLyric.text.toUpperCase() : activeLyric?.text || "";
-  const words = displayText.split(/\s+/).filter(Boolean);
+  const lyricTokens = splitLyricTokens(displayText);
+  const wordCount = lyricTokens.filter(token => token.trim()).length;
+  let visualWordIndex = 0;
+  const karaokeToken = (token: string, key: string) => {
+    if (!token.trim()) return <React.Fragment key={key}>{token}</React.Fragment>;
+    const index = visualWordIndex++;
+    const timedWord = activeLyric?.wordTimings?.[index];
+    const wordP = timedWord
+      ? Math.max(0, Math.min(1, (currentTime - timedWord.start) / Math.max(0.08, timedWord.end - timedWord.start)))
+      : Math.max(0, Math.min(1, animP * wordCount - index));
+    const fill = Math.round(wordP * 100);
+    return <span key={key} className="inline-block" style={{ backgroundImage: `linear-gradient(to right, ${ts.glowOn ? ts.glowColor : "#C4B5FD"} ${fill}%, ${ts.color} ${fill}%)`, WebkitBackgroundClip: "text", backgroundClip: "text", WebkitTextFillColor: "transparent", color: "transparent" }}>{token}</span>;
+  };
 
   const renderLyricText = () => {
     if (!activeLyric) {
@@ -716,7 +730,7 @@ export default function App() {
     }
     const rot: React.CSSProperties = ts.rotate ? { transform: `rotate(${ts.rotate}deg)` } : {};
     switch (ts.animation) {
-      case "Karaoke Fill": { const pct = Math.round(animP * 100); return <span style={{ ...base, ...rot, backgroundImage: `linear-gradient(to right, ${ts.glowOn ? ts.glowColor : "#C4B5FD"} ${pct}%, ${ts.color} ${pct}%)`, WebkitBackgroundClip: "text", backgroundClip: "text", WebkitTextFillColor: "transparent", color: "transparent", textShadow: "none" }}>{displayText}</span>; }
+      case "Karaoke Fill": return <span style={{ ...base, ...rot, textShadow: "none" }}>{lyricTokens.map((token, i) => karaokeToken(token, `${activeLyric.id}-karaoke-${i}`))}</span>;
       case "Typewriter + Cursor": { const chars = Math.floor(animP * displayText.length); return <span style={{ ...base, ...rot }}>{displayText.slice(0, chars)}<span className="cursor-blink">|</span></span>; }
       case "Floating Handwritten": return <span key={activeLyric.id} className="anim-float relative inline-block" style={{ ...base, ...rot }}>{displayText}{ts.hearts && <Hearts />}</span>;
       case "Glitch & Scale": return <span key={activeLyric.id} className={`anim-glitch anim-popin inline-block ${ts.chroma ? "chroma" : ""}`} style={{ ...base, ...rot }}>{displayText}</span>;
@@ -777,9 +791,13 @@ export default function App() {
             <button onClick={undo} disabled={!historyRef.current.length} className={`${btnGhost} disabled:opacity-40`} title={titleAttr("Undo (Ctrl+Z)", "เลิกทำ")}><Undo2 className="h-3.5 w-3.5" /></button>
             <button onClick={redo} disabled={!futureRef.current.length} className={`${btnGhost} disabled:opacity-40`} title={titleAttr("Redo (Ctrl+Shift+Z)", "ทำซ้ำ")}><Redo2 className="h-3.5 w-3.5" /></button>
           </div>
-          <div className="ml-auto flex flex-wrap items-center gap-2">
+          <div className="ml-auto hidden flex-wrap items-center gap-2 xl:flex">
             <span className={label}>{saveState === "saving" ? "Saving…" : saveState === "saved" ? "✓ Saved in browser" : saveState === "offline" ? "Save unavailable" : ""}</span>
             <button onClick={() => void saveProject()} className={btnGhost} title={titleAttr("Save project (settings + lyrics)", "บันทึกโปรเจกต์")}><Save className="h-3.5 w-3.5" /> Save</button>
+            <button onClick={() => setShowHeaderExportTools((v) => !v)} className={btnGhost} aria-expanded={showHeaderExportTools} title={titleAttr(showHeaderExportTools ? "Hide export settings" : "Show export settings", showHeaderExportTools ? "ซ่อนการตั้งค่าส่งออก" : "แสดงการตั้งค่าส่งออก")}>
+              {showHeaderExportTools ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}{showHeaderExportTools ? "Hide export" : "Export settings"}
+            </button>
+            {showHeaderExportTools && <>
             <div className="flex overflow-hidden rounded-lg border border-[var(--border)]" title={titleAttr("Aspect ratio", "อัตราส่วนภาพ")}>
               {ASPECTS.map((a) => <button key={a} onClick={() => setAspect(a)} className={`px-2.5 py-1.5 text-[11px] font-bold ${aspect === a ? "bg-[var(--accent)] text-white" : "bg-[var(--surface2)]"}`}>{a}</button>)}
             </div>
@@ -788,6 +806,7 @@ export default function App() {
             {recording ? (<button onClick={() => exportStopRef.current?.()} className="flex items-center gap-1.5 rounded-lg bg-red-500 px-3 py-1.5 text-[11px] font-bold text-white">■ Stop Export</button>) : (
               <button onClick={startExport} disabled={converting || (!lyrics.length && !backgrounds.length)} className="flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-3 py-1.5 text-[11px] font-bold text-white shadow-[0_0_16px_rgba(139,92,246,.45)] disabled:opacity-40" title={titleAttr("Record and export MP4", "ส่งออกวิดีโอ MP4")}><Download className="h-3.5 w-3.5" /> {converting ? 'Converting MP4…' : `Export MP4 ${aspect}`}</button>
             )}
+            </>}
           </div>
         </div>
         {notice && <div className="border-t border-[var(--border)] px-4 py-1.5"><p className="flex items-center gap-2 text-[11px] text-[var(--muted)]"><Sparkles className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />{notice}</p></div>}
@@ -996,13 +1015,22 @@ export default function App() {
         </section>
 
         {/* RIGHT — independent scroll, sticky tabs */}
-        <aside className={`studio-sidebar min-h-0 flex-col overflow-hidden border-l border-[var(--border)] bg-[var(--surface)] xl:w-[380px] xl:shrink-0 max-xl:w-full max-xl:border-l-0 max-xl:border-t ${mobileView === "tools" ? "flex max-xl:flex" : "hidden max-xl:hidden"} xl:flex`}>
-          <div className="sticky top-0 z-10 flex shrink-0 border-b border-[var(--border)] bg-[var(--surface)]">
+        <aside className={`studio-sidebar min-h-0 flex-col overflow-hidden border-l border-[var(--border)] bg-[var(--surface)] xl:w-[380px] xl:shrink-0 max-xl:w-full max-xl:border-l-0 max-xl:border-t ${mobileView === "tools" || mobileView === "export" ? "flex max-xl:flex" : "hidden max-xl:hidden"} xl:flex`}>
+          <div className="sticky top-0 z-10 hidden shrink-0 border-b border-[var(--border)] bg-[var(--surface)] xl:flex">
             {([["media", "Media · สื่อ", Music2], ["text", "Text · ตัวอักษร", Type], ["background", "Background · พื้นหลัง", Layers], ["presets", "Presets · พรีเซ็ต", Sparkles], ["cloud", "Cloud · AI", Check]] as const).map(([k, l, Icon]) => (
               <button key={k} onClick={() => setTab(k)} className={`flex flex-1 items-center justify-center gap-1.5 px-1.5 py-2.5 text-[10px] font-bold ${tab === k ? "bg-[var(--accent-soft)] text-white shadow-[inset_0_-2px_0_var(--accent)]" : "text-[var(--muted)] hover:text-white"}`}><Icon className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{l}</span></button>
             ))}
           </div>
           <div className="thin-scroll min-h-0 flex-1 space-y-4 overflow-y-auto overflow-x-hidden p-3.5">
+            {mobileView === "export" && <section className={`${card} space-y-4 p-4`}>
+              <div><p className={`${label} mb-1`}>EXPORT · ส่งออกวิดีโอ</p><p className="text-sm font-semibold">ตั้งค่าขนาดและไฟล์</p></div>
+              <div><p className={`${label} mb-2`}>Aspect ratio · อัตราส่วนภาพ</p><div className="flex overflow-hidden rounded-lg border border-[var(--border)]" title={titleAttr("Aspect ratio", "อัตราส่วนภาพ")}>{ASPECTS.map((a) => <button key={a} onClick={() => setAspect(a)} className={`flex-1 px-2.5 py-2 text-xs font-bold ${aspect === a ? "bg-[var(--accent)] text-white" : "bg-[var(--surface2)]"}`}>{a}</button>)}</div></div>
+              <div className="flex items-center justify-between gap-3"><label className="flex items-center gap-2 text-xs font-semibold" title={titleAttr("Include audio in export", "ใส่เสียงในวิดีโอที่ส่งออก")}><input type="checkbox" checked={includeAudio} onChange={(e) => setIncludeAudio(e.target.checked)} className="accent-[#8B5CF6]" /> ใส่เสียงในวิดีโอ</label><select value={exportQuality} onChange={(e) => setExportQuality(e.target.value as "1080p" | "720p")} className="!w-auto" title={titleAttr("Export quality", "คุณภาพวิดีโอ")}><option value="1080p">1080p</option><option value="720p">720p</option></select></div>
+              <button onClick={() => void saveProject()} className={`${btnGhost} w-full justify-center`}><Save className="h-3.5 w-3.5" /> Save project</button>
+              {recording ? <button onClick={() => exportStopRef.current?.()} className="flex w-full items-center justify-center gap-2 rounded-lg bg-red-500 px-3 py-3 text-sm font-bold text-white">■ หยุดส่งออก</button> : <button onClick={startExport} disabled={converting || (!lyrics.length && !backgrounds.length)} className="flex w-full items-center justify-center gap-2 rounded-lg bg-[var(--accent)] px-3 py-3 text-sm font-bold text-white shadow-[0_0_16px_rgba(139,92,246,.45)] disabled:opacity-40"><Download className="h-4 w-4" /> {converting ? "กำลังแปลง MP4…" : `ส่งออก MP4 · ${aspect} · ${exportQuality}`}</button>}
+              <p className="text-[11px] leading-relaxed text-[var(--muted)]">เรนเดอร์เสร็จแล้วจะแสดงปุ่มดาวน์โหลด · หน้านี้ต้องเปิดไว้ระหว่างส่งออก</p>
+            </section>}
+            {mobileView !== "export" && <>
             {tab === "media" && <div className="space-y-3">
               <section className={`${card} p-3.5`}>
                 <p className={`${label} mb-2.5 flex items-center gap-2`}><Music2 className="h-3.5 w-3.5" /> Song · เพลง</p>
@@ -1242,14 +1270,15 @@ export default function App() {
               </>)}
               <button onClick={() => void saveCustomPreset()} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[var(--accent)] px-3 py-2.5 text-xs font-bold text-white" title={titleAttr("Save current text style as a preset", "บันทึกสไตล์ปัจจุบันเป็นพรีเซ็ต")}><Save className="h-3.5 w-3.5" /> Save as Custom Preset · บันทึกพรีเซ็ตของฉัน</button>
             </>)}
+            </>}
           </div>
         </aside>
       </main>
 
       <nav className="flex h-[62px] shrink-0 items-stretch justify-around overflow-x-auto border-t border-[var(--border)] bg-[rgba(14,14,18,.98)] px-1 pb-[env(safe-area-inset-bottom)] shadow-[0_-8px_24px_rgba(0,0,0,.28)] xl:hidden" aria-label="Mobile editing toolbar">
-        {([ ["stage", "Preview", MonitorPlay], ["media", "Media", Music2], ["text", "Text", Type], ["background", "Backdrop", Layers], ["presets", "Style", Sparkles], ["cloud", "AI / MCP", Check]] as const).map(([key, title, Icon]) => {
-          const selected = key === "stage" ? mobileView === "stage" : mobileView === "tools" && tab === key;
-          return <button key={key} onClick={() => key === "stage" ? setMobileView("stage") : (setMobileView("tools"), setTab(key))} aria-pressed={selected} className={`relative flex min-w-[62px] flex-1 flex-col items-center justify-center gap-1 px-1 text-[10px] font-semibold transition ${selected ? "text-[var(--accent)]" : "text-[var(--muted)] hover:text-white"}`}><Icon className="h-[18px] w-[18px]" /><span className="whitespace-nowrap">{title}</span>{selected && <span className="absolute inset-x-2 top-0 h-0.5 rounded-b bg-[var(--accent)] shadow-[0_0_12px_var(--accent)]" />}</button>;
+        {([ ["stage", "Preview", MonitorPlay], ["media", "Media", Music2], ["text", "Text", Type], ["background", "Backdrop", Layers], ["presets", "Style", Sparkles], ["cloud", "AI / MCP", Check], ["export", "Export", Download]] as const).map(([key, title, Icon]) => {
+          const selected = key === "stage" ? mobileView === "stage" : key === "export" ? mobileView === "export" : mobileView === "tools" && tab === key;
+          return <button key={key} onClick={() => key === "stage" ? setMobileView("stage") : key === "export" ? setMobileView("export") : (setMobileView("tools"), setTab(key))} aria-pressed={selected} className={`relative flex min-w-0 flex-1 flex-col items-center justify-center gap-1 px-0.5 text-[9px] font-semibold transition ${selected ? "text-[var(--accent)]" : "text-[var(--muted)] hover:text-white"}`}><Icon className="h-[18px] w-[18px]" /><span className="whitespace-nowrap">{title}</span>{selected && <span className="absolute inset-x-2 top-0 h-0.5 rounded-b bg-[var(--accent)] shadow-[0_0_12px_var(--accent)]" />}</button>;
         })}
       </nav>
       <footer className="hidden shrink-0 border-t border-[var(--border)] px-4 py-1.5 xl:block"><p className={`${label} text-center`}>LV Pro Studio V2 — you bring the media, we bring the stage · ไม่ใช้ AI สร้างภาพ ทุกอย่างมาจากไฟล์ของคุณ</p></footer>
