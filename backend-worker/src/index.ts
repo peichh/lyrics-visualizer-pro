@@ -1,14 +1,17 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { proposalRoutes } from './proposalRoutes';
 
-type Bindings = { DB: D1Database; FRONTEND_URL: string; }
+type Bindings = { DB: D1Database; FRONTEND_URL: string; OWNER_TOKEN: string; AI_TOKEN: string; }
 const app = new Hono<{ Bindings: Bindings }>();
 
 app.use('/*', cors({
   origin: (o, c) => c.env.FRONTEND_URL || '*',
   allowMethods: ['GET','POST','PUT','DELETE','OPTIONS'],
-  allowHeaders: ['Content-Type']
+  allowHeaders: ['Content-Type', 'Authorization']
 }));
+
+app.route('/api/proposals', proposalRoutes);
 
 app.get('/mcp/tools', (c) => c.json({
   name: 'lyrics-visualizer-mcp',
