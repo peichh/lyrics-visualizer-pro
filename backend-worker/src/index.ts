@@ -1,15 +1,13 @@
 import { rpcMessage } from './mcp';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { proposalRoutes } from './proposalRoutes';
+import { accountForKey, proposalRoutes } from './proposalRoutes';
 import { validateProject } from './projectValidation';
 
 type Bindings = { DB: D1Database; FRONTEND_URL: string };
 type Variables = { userId: string };
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
-const encoder = new TextEncoder();
-const hex = (bytes: Uint8Array) => Array.from(bytes, b => b.toString(16).padStart(2,'0')).join('');
-const hash = async (value: string) => hex(new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(value))));
+const hash = async (value: string) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value))),b=>b.toString(16).padStart(2,'0')).join('');
 
 app.use('/*',cors({origin:(origin,c)=>{if(!origin)return c.env.FRONTEND_URL||'*';try{const u=new URL(origin);return origin===c.env.FRONTEND_URL||u.hostname.endsWith('.lyrics-visualizer-pro.pages.dev')||['localhost','127.0.0.1'].includes(u.hostname)?origin:'null';}catch{return 'null';}},allowMethods:['GET','POST','PUT','DELETE','OPTIONS'],allowHeaders:['Content-Type','Authorization']}));
 
@@ -25,7 +23,7 @@ app.use('/api/*',async(c,next)=>{
   if(c.req.path==='/api/account')return next();
   const bearer=c.req.header('Authorization');
   if(!bearer?.startsWith('Bearer '))return c.json({error:'Account API key required'},401);
-  const user=await c.env.DB.prepare('SELECT id FROM users WHERE api_key_hash = ?').bind(await hash(bearer.slice(7))).first<{id:string}>();
+  const user=await accountForKey(c.env.DB,bearer.slice(7));
   if(!user)return c.json({error:'Invalid account API key'},401);
   c.set('userId',user.id);await next();
 });
@@ -63,12 +61,12 @@ app.get('/api/projects/:id',async c=>{
 // MCP clients authenticate with the same per-user key shown once at account creation.
 app.use('/mcp/*',async(c,next)=>{
   const bearer=c.req.header('Authorization');if(!bearer?.startsWith('Bearer '))return c.json({error:'Account API key required'},401);
-  const user=await c.env.DB.prepare('SELECT id FROM users WHERE api_key_hash=?').bind(await hash(bearer.slice(7))).first<{id:string}>();
+  const user=await accountForKey(c.env.DB,bearer.slice(7));
   if(!user)return c.json({error:'Invalid account API key'},401);c.set('userId',user.id);await next();
 });
 app.use('/mcp',async(c,next)=>{
   const bearer=c.req.header('Authorization');if(!bearer?.startsWith('Bearer '))return c.json({error:'Account API key required'},401);
-  const user=await c.env.DB.prepare('SELECT id FROM users WHERE api_key_hash=?').bind(await hash(bearer.slice(7))).first<{id:string}>();
+  const user=await accountForKey(c.env.DB,bearer.slice(7));
   if(!user)return c.json({error:'Invalid account API key'},401);c.set('userId',user.id);await next();
 });
 app.get('/mcp',()=>new Response(null,{status:405,headers:{Allow:'POST'}}));

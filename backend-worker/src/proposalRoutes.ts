@@ -13,11 +13,16 @@ export async function authorized(header: string | undefined, token: string | und
   return diff === 0;
 }
 
+export async function accountForKey(db: D1Database, key: string) {
+  const bytes=new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(key)));
+  const digest=Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
+  return db.prepare('SELECT id FROM users WHERE api_key_hash = ?').bind(digest).first<{id:string}>();
+}
+
 proposalRoutes.use('*', async (c, next) => {
   const bearer=c.req.header('Authorization');
   if(!bearer?.startsWith('Bearer '))return c.json({error:'Account API key required'},401);
-  const digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(bearer.slice(7)))).map(b=>b.toString(16).padStart(2,'0'))).join('');
-  const user=await c.env.DB.prepare('SELECT id FROM users WHERE api_key_hash = ?').bind(digest).first<{id:string}>();
+  const user=await accountForKey(c.env.DB,bearer.slice(7));
   if(!user)return c.json({error:'Invalid account API key'},401);
   c.set('userId',user.id);
   await next();
