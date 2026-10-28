@@ -1,4 +1,5 @@
 import { parseTimestampedLyrics } from "./lyrics-parser.mjs";
+import { drawGrain, drawLyricFrame } from './lyric-renderer';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Upload, FileText, Play, Pause, Sparkles, Download, Music2, Image as ImageIcon, Film,
@@ -22,7 +23,7 @@ type AnimName = "Karaoke Fill" | "Typewriter + Cursor" | "Floating Handwritten" 
 type CurveMode = "off" | "arc-top" | "arc-bottom" | "circle";
 type VAlign = "top" | "center" | "bottom";
 type TextWidthMode = "auto" | "85" | "80" | "full";
-type TextStyle = {
+export type TextStyle = {
   fontFamily: string; fontSize: number; scale: number; weight: number; italic: boolean;
   letterSpacing: number; lineHeight: number; color: string; opacity: number;
   boxColor: string; boxOpacity: number; boxPadding: number; boxRadius: number;
@@ -182,8 +183,8 @@ function MediaLayer({ item, active, fade, registerRef }: { item: BgItem; active:
   }, [item, active, front, fade]);
   if (item.kind === "video") {
     const common = "absolute inset-0 h-full w-full";
-    const styleA: React.CSSProperties = { filter, opacity: front === "A" ? 1 : xfade, zIndex: front === "A" ? 2 : 1 };
-    const styleB: React.CSSProperties = { filter, opacity: front === "B" ? 1 : xfade, zIndex: front === "B" ? 2 : 1 };
+    const styleA: React.CSSProperties = { filter, opacity: front === "A" ? 1 : xfade, zIndex: front === "A" ? 1 : 2 };
+    const styleB: React.CSSProperties = { filter, opacity: front === "B" ? 1 : xfade, zIndex: front === "B" ? 1 : 2 };
     return (<>
       <video ref={(el) => { vA.current = el; registerRef(item.id + "A", el); }} src={item.url} muted playsInline loop={item.loop && item.loopMode === "normal"} className={`${common} ${fitCls}`} style={styleA} onLoadedMetadata={(e) => { if (item.trimStart) e.currentTarget.currentTime = item.trimStart; }} />
       <video ref={(el) => { vB.current = el; registerRef(item.id + "B", el); }} src={item.url} muted playsInline className={`${common} ${fitCls}`} style={styleB} />
@@ -233,6 +234,7 @@ export default function App() {
 
   const audioRef = useRef<HTMLAudioElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
+  const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   const mediaRefs = useRef<Map<string, HTMLElement>>(new Map());
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -416,32 +418,52 @@ export default function App() {
   const selBg = backgrounds.find((b) => b.id === selectedBg) || backgrounds[activeBgIdx] || null;
 
   const drawExportFrame = useCallback((ctx: CanvasRenderingContext2D, W: number, H: number) => {
-    ctx.fillStyle = "#0E0E11"; ctx.fillRect(0, 0, W, H);
-    const bg = backgrounds[activeBgIdx];
-    if (bg) {
-      const el = (mediaRefs.current.get(bg.id + "A") || mediaRefs.current.get(bg.id)) as CanvasImageSource | undefined;
-      if (el) { try {
-        const iw = (el as HTMLVideoElement).videoWidth || (el as HTMLImageElement).naturalWidth || W;
-        const ih = (el as HTMLVideoElement).videoHeight || (el as HTMLImageElement).naturalHeight || H;
-        ctx.save(); ctx.filter = `blur(${bg.blur}px) brightness(${bg.brightness}%) contrast(${bg.contrast}%)`;
-        if (bg.fit === "stretch") ctx.drawImage(el, 0, 0, W, H);
-        else { const s = bg.fit === "cover" ? Math.max(W / iw, H / ih) : Math.min(W / iw, H / ih); ctx.drawImage(el, (W - iw * s) / 2, (H - ih * s) / 2, iw * s, ih * s); }
+    ctx.save(); ctx.scale(W, H);
+    const backdrop = ctx.createRadialGradient(.5, .38, 0, .5, .38, .65);
+    backdrop.addColorStop(0, '#221D38'); backdrop.addColorStop(.62, '#0B0B0F'); backdrop.addColorStop(1, '#060607');
+    ctx.fillStyle = backdrop; ctx.fillRect(0, 0, 1, 1); ctx.restore();
+    const drawBackground = (bg: BgItem, alpha: number) => {
+      const layers = (bg.kind === 'video' ? [mediaRefs.current.get(bg.id + 'A'), mediaRefs.current.get(bg.id + 'B')] : [mediaRefs.current.get(bg.id)])
+        .filter((el): el is HTMLElement => !!el)
+        .sort((a, b) => Number(a.style.zIndex || 0) - Number(b.style.zIndex || 0));
+      for (const el of layers) { try {
+        const iw = (el as HTMLVideoElement).videoWidth || (el as HTMLImageElement).naturalWidth;
+        const ih = (el as HTMLVideoElement).videoHeight || (el as HTMLImageElement).naturalHeight;
+        if (!iw || !ih) continue;
+        ctx.save(); ctx.globalAlpha = alpha * (el.style.opacity ? Number(el.style.opacity) : 1);
+        ctx.filter = `blur(${bg.blur * W / ASPECT_BASE[aspect][0]}px) brightness(${bg.brightness}%) contrast(${bg.contrast}%)`;
+        if (bg.fit === "stretch") ctx.drawImage(el as CanvasImageSource, 0, 0, W, H);
+        else { const s = bg.fit === "cover" ? Math.max(W / iw, H / ih) : Math.min(W / iw, H / ih); ctx.drawImage(el as CanvasImageSource, (W - iw * s) / 2, (H - ih * s) / 2, iw * s, ih * s); }
         ctx.restore();
-        if (bg.tintOpacity > 0) { ctx.fillStyle = hexA(bg.tint.startsWith("#") ? bg.tint : "#8B5CF6", bg.tintOpacity); ctx.fillRect(0, 0, W, H); }
       } catch { /* frame not ready */ } }
-    }
-    if (activeLyric) {
-      const size = ts.fontSize * ts.scale * (W / 1280) * 1.6;
-      ctx.save(); ctx.font = `${ts.italic ? "italic " : ""}${ts.weight} ${size}px '${ts.fontFamily}', sans-serif`; ctx.textAlign = ts.align; ctx.globalAlpha = ts.opacity;
-      const tx = (ts.x / 100) * W; const ty = (ts.y / 100) * H; const text = ts.uppercase ? activeLyric.text.toUpperCase() : activeLyric.text;
-      if (ts.glowOn) { ctx.shadowColor = ts.glowColor; ctx.shadowBlur = ts.glowIntensity * 2; }
-      else if (ts.shadowOn) { ctx.shadowColor = ts.shadowColor; ctx.shadowBlur = ts.shadowBlur; ctx.shadowOffsetX = ts.shadowX; ctx.shadowOffsetY = ts.shadowY; }
-      if (ts.strokeOn && ts.strokeWidth > 0) { ctx.lineWidth = ts.strokeWidth * 2; ctx.strokeStyle = ts.strokeColor; ctx.strokeText(text, tx, ty); }
-      ctx.fillStyle = ts.color; ctx.fillText(text, tx, ty); ctx.restore();
-    }
-  }, [backgrounds, activeBgIdx, activeLyric, ts]);
+      if (bg.tintOpacity > 0 && layers.length) { ctx.save(); ctx.globalAlpha = alpha; ctx.fillStyle = hexA(bg.tint.startsWith("#") ? bg.tint : "#8B5CF6", bg.tintOpacity); ctx.fillRect(0, 0, W, H); ctx.restore(); }
+    };
+    if (showPrev && backgrounds[prevBgIdx]) drawBackground(backgrounds[prevBgIdx], 1);
+    if (backgrounds[activeBgIdx]) drawBackground(backgrounds[activeBgIdx], showPrev ? 1 - prevOpacity : 1);
+    if (activeLyric) drawLyricFrame(ctx, W, H, { text: activeLyric.text, elapsed: currentTime - segStart, duration: segEnd - segStart, style: ts, referenceWidth: ASPECT_BASE[aspect][0] });
+    if (ts.grain) drawGrain(ctx, W, H);
+  }, [backgrounds, activeBgIdx, activeLyric, ts, currentTime, segStart, segEnd, aspect, showPrev, prevBgIdx, prevOpacity]);
   const drawExportFrameRef = useRef(drawExportFrame);
   drawExportFrameRef.current = drawExportFrame;
+
+  useEffect(() => {
+    const canvas = previewCanvasRef.current;
+    const stage = stageRef.current;
+    if (!canvas || !stage) return;
+    let animationFrame = 0;
+    const draw = () => {
+      const ratio = Math.min(devicePixelRatio || 1, 2);
+      const width = Math.max(1, Math.round(stage.clientWidth * ratio));
+      const height = Math.max(1, Math.round(stage.clientHeight * ratio));
+      if (canvas.width !== width) canvas.width = width;
+      if (canvas.height !== height) canvas.height = height;
+      const ctx = canvas.getContext('2d'); if (!ctx) return;
+      drawExportFrameRef.current(ctx, width, height);
+      animationFrame = requestAnimationFrame(draw);
+    };
+    draw();
+    return () => cancelAnimationFrame(animationFrame);
+  }, []);
 
   const startExport = () => {
     const [bw, bh] = ASPECT_BASE[aspect];
@@ -763,7 +785,7 @@ export default function App() {
           {/* STAGE — the center area IS the video canvas: full-fill frame, dark surround, no checkerboard */}
           <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-[#0A0A0A] p-3 md:p-6" onPointerDown={() => setTextSelected(false)}>
             <div ref={stageRef} onWheel={onStageWheel}
-              className={`relative overflow-hidden bg-black shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08),0_24px_70px_rgba(0,0,0,0.65)] ${ts.grain ? "grain" : ""} ${frameCls}`}
+              className={`relative overflow-hidden bg-black shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08),0_24px_70px_rgba(0,0,0,0.65)] ${frameCls}`}
               style={{ aspectRatio: aspect.replace(":", " / ") }}>
               {aspect === "9:16" && <div className="pointer-events-none absolute left-1/2 top-1.5 z-40 h-[14px] w-[64px] -translate-x-1/2 rounded-full bg-black/80 ring-1 ring-white/10" />}
               {backgrounds.length === 0 && (
@@ -771,6 +793,7 @@ export default function App() {
               )}
               {showPrev && backgrounds[prevBgIdx] && (<div className="absolute inset-0 z-0" style={{ opacity: prevOpacity }}><MediaLayer item={backgrounds[prevBgIdx]} active={false} fade={bgFade} registerRef={(id, el) => { if (el) mediaRefs.current.set(id, el); }} /></div>)}
               {backgrounds[activeBgIdx] && (<div className="absolute inset-0 z-0"><MediaLayer key={backgrounds[activeBgIdx].id} item={backgrounds[activeBgIdx]} active={playing} fade={bgFade} registerRef={(id, el) => { if (el) mediaRefs.current.set(id, el); }} /></div>)}
+              <canvas ref={previewCanvasRef} className="pointer-events-none absolute inset-0 z-10 h-full w-full" aria-hidden="true" />
               {safeArea && <div className="pointer-events-none absolute inset-[5%] z-20 rounded border border-dashed border-white/40"><span className="absolute left-1 top-1 text-[9px] text-white/60">SAFE 90%</span></div>}
               {(dragging || snapX) && <div className="pointer-events-none absolute left-1/2 top-0 z-20 h-full w-px bg-[var(--accent)]/80" />}
               {(dragging || snapY) && <div className="pointer-events-none absolute left-0 top-1/2 z-20 h-px w-full bg-[var(--accent)]/80" />}
@@ -781,14 +804,14 @@ export default function App() {
                   left: `${ts.x}%`, top: `${ts.y}%`,
                   transform: `translate(${txPct}, ${tyPct}) scale(${ts.scale})`,
                   transformOrigin: "center center",
-                  background: ts.boxOpacity > 0 ? hexA(ts.boxColor, ts.boxOpacity) : "transparent",
+                  background: !activeLyric && ts.boxOpacity > 0 ? hexA(ts.boxColor, ts.boxOpacity) : "transparent",
                   padding: ts.boxOpacity > 0 ? ts.boxPadding : "8px 2%", borderRadius: ts.boxRadius,
-                  backdropFilter: ts.backdropBlur > 0 ? `blur(${ts.backdropBlur}px)` : undefined,
+                  backdropFilter: !activeLyric && ts.backdropBlur > 0 ? `blur(${ts.backdropBlur}px)` : undefined,
                   display: "flex", justifyContent: "center", alignItems: ts.vAlign === "top" ? "flex-start" : ts.vAlign === "bottom" ? "flex-end" : "center",
                   minHeight: ts.textWidth === "auto" ? undefined : "1em",
                 }}
                 title={ts.locked ? titleAttr("Position locked — unlock to drag", "ล็อกอยู่ ปลดล็อกก่อนลาก") : titleAttr("Drag to move · scroll to scale · corners scale", "ลากเพื่อย้าย · เลื่อนเมาส์เพื่อขยาย")}>
-                {renderLyricText()}
+                <span style={activeLyric ? { opacity: 0 } : undefined}>{renderLyricText()}</span>
                 {textSelected && !ts.locked && (<>
                   <span onPointerDown={onCornerDown} className="absolute -left-[5px] -top-[5px] z-40 h-2.5 w-2.5 cursor-nwse-resize rounded-[2px] border border-[var(--accent)] bg-white shadow" title={titleAttr("Drag to scale", "ลากเพื่อปรับขนาด")} />
                   <span onPointerDown={onCornerDown} className="absolute -right-[5px] -top-[5px] z-40 h-2.5 w-2.5 cursor-nesw-resize rounded-[2px] border border-[var(--accent)] bg-white shadow" title={titleAttr("Drag to scale", "ลากเพื่อปรับขนาด")} />
