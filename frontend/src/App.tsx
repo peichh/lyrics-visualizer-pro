@@ -226,6 +226,7 @@ export default function App() {
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "offline">("idle");
   const [projectId, setProjectId] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
+  const [converting, setConverting] = useState(false);
   const [includeAudio, setIncludeAudio] = useState(true);
   const [exportQuality, setExportQuality] = useState<"1080p" | "720p">("1080p");
   const [dragOver, setDragOver] = useState(false);
@@ -351,10 +352,11 @@ export default function App() {
   const togglePlay = useCallback(() => { const a = audioRef.current; if (a && audioUrl) { if (a.paused) void a.play().catch(() => {}); else a.pause(); } else setPlaying((p) => !p); }, [audioUrl]);
   useEffect(() => {
     if (!audioUrl && playing) {
-      const iv = setInterval(() => setCurrentTime((t) => { const n = t + 0.1; if (n >= totalDur) { if (loopPreview) return 0; setPlaying(false); return totalDur; } return n; }), 100);
+      const iv = setInterval(() => setCurrentTime((t) => { const n = t + 0.1; if (n >= totalDur) { if (loopPreview && !recording) return 0; setPlaying(false); return totalDur; } return n; }), 100);
       return () => clearInterval(iv);
     }
-  }, [playing, audioUrl, totalDur, loopPreview]);
+  }, [playing, audioUrl, totalDur, loopPreview, recording]);
+  useEffect(() => { if (recording && !audioUrl && currentTime >= totalDur) exportStopRef.current?.(); }, [recording, audioUrl, currentTime, totalDur]);
   useEffect(() => { let raf = 0; const loop = () => { const a = audioRef.current; if (a && audioUrl && !a.paused) setCurrentTime(a.currentTime); raf = requestAnimationFrame(loop); }; raf = requestAnimationFrame(loop); return () => cancelAnimationFrame(raf); }, [audioUrl]);
   const seek = (t: number) => { const c = Math.max(0, Math.min(totalDur, t)); setCurrentTime(c); if (audioRef.current) audioRef.current.currentTime = c; };
   useEffect(() => {
@@ -443,22 +445,61 @@ export default function App() {
 
   const startExport = () => {
     const [bw, bh] = ASPECT_BASE[aspect];
-    const scaleF = exportQuality === "1080p" ? (aspect === "16:9" ? 1.5 : 1.125) : 1;
+    const scaleF = exportQuality === "1080p" ? (aspect === "16:9" || aspect === "9:16" ? 1.5 : 1.125) : 1;
     const W = Math.round(bw * scaleF), H = Math.round(bh * scaleF);
     const canvas = document.createElement("canvas"); canvas.width = W; canvas.height = H;
     const ctx = canvas.getContext("2d"); if (!ctx) return;
     const stream = canvas.captureStream(30);
-    if (includeAudio && audioRef.current && audioUrl) { try { const AC = new AudioContext(); const src = AC.createMediaElementSource(audioRef.current); const dest = AC.createMediaStreamDestination(); src.connect(dest); src.connect(AC.destination); dest.stream.getAudioTracks().forEach((t) => stream.addTrack(t)); } catch { /* audio capture unavailable */ } }
-    let mime = "video/webm";
-    const rec = new MediaRecorder(stream, { mimeType: MediaRecorder.isTypeSupported("video/webm;codecs=vp9") ? "video/webm;codecs=vp9" : "video/webm" });
+    const mime = MediaRecorder.isTypeSupported("video/webm;codecs=vp9") ? "video/webm;codecs=vp9" : "video/webm";
+    if (!MediaRecorder.isTypeSupported(mime)) { setNotice("This browser cannot record video. Please try Chrome or Edge. · เบราว์เซอร์นี้ไม่รองรับการบันทึกวิดีโอ"); return; }
+    const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8_000_000 });
     chunksRef.current = [];
     rec.ondataavailable = (e) => { if (e.data.size) chunksRef.current.push(e.data); };
-    rec.onstop = () => { cancelAnimationFrame(raf); const blob = new Blob(chunksRef.current, { type: mime }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `lyrics-visualizer-${exportQuality}-${aspect.replace(":", "x")}.webm`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 4000); setRecording(false); setNotice("Export downloaded (WebM). Convert to MP4 in any editor if needed. · ดาวน์โหลดวิดีโอแล้ว"); };
+    rec.onstop = () => {
+      cancelAnimationFrame(raf); stream.getTracks().forEach(track => track.stop());
+      audioRef.current?.pause(); setPlaying(false); setRecording(false); setConverting(true);
+      const blob = new Blob(chunksRef.current, { type: mime });
+      void (async () => {
+        const { FFmpeg } = await import('@ffmpeg/ffmpeg');
+        const { fetchFile } = await import('@ffmpeg/util');
+        const ffmpeg = new FFmpeg();
+        try {
+          setNotice('กำลังเตรียมตัวแปลง MP4 และประมวลผลวิดีโอในเบราว์เซอร์ โปรดเปิดหน้านี้ไว้');
+          const base = `${import.meta.env.BASE_URL}ffmpeg/`;
+          const responses = await Promise.all(['core-part-0.bin', 'core-part-1.bin'].map(part => fetch(base + part)));
+          if (responses.some(response => !response.ok)) throw new Error('Cannot load MP4 encoder');
+          setNotice('กำลังโหลดตัวเข้ารหัส MP4…');
+          const wasmURL = URL.createObjectURL(new Blob(await Promise.all(responses.map(response => response.arrayBuffer())), {type:'application/wasm'}));
+          const coreURL = new URL(base + 'ffmpeg-core.js', location.href).href;
+          try { await ffmpeg.load({ coreURL, wasmURL }); } finally { URL.revokeObjectURL(wasmURL); }
+          setNotice('กำลังเตรียมภาพและเสียงสำหรับ MP4…');
+          await ffmpeg.writeFile('video.webm', await fetchFile(blob));
+          const args = ['-i', 'video.webm'];
+          if (includeAudio && audioUrl) { await ffmpeg.writeFile('audio.input', await fetchFile(audioUrl)); args.push('-i', 'audio.input', '-map', '0:v:0', '-map', '1:a:0', '-c:a', 'aac', '-shortest'); }
+          args.push('-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', 'output.mp4');
+          ffmpeg.on('progress', ({progress}) => setNotice(`กำลังแปลง MP4 ${Math.min(99, Math.max(0, Math.round(progress * 100)))}% · โปรดเปิดหน้านี้ไว้`));
+          setNotice('กำลังแปลง MP4 · โปรดเปิดหน้านี้ไว้');
+          const result = await ffmpeg.exec(args);
+          if (result !== 0) throw new Error('MP4 conversion failed');
+          const data = await ffmpeg.readFile('output.mp4');
+          if (typeof data === 'string') throw new Error('Invalid MP4 output');
+          const url = URL.createObjectURL(new Blob([data as BlobPart], {type:'video/mp4'}));
+          const a = document.createElement('a'); a.href = url; a.download = `lyrics-visualizer-${exportQuality}-${aspect.replace(':','x')}.mp4`; a.click();
+          setTimeout(() => URL.revokeObjectURL(url), 60000);
+          setNotice('ดาวน์โหลด MP4 แล้ว · MP4 export complete');
+        } finally { ffmpeg.terminate(); }
+      })().catch((error) => {
+        console.error('MP4 export failed', error);
+        const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'lyrics-visualizer-recovery.webm'; a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+        setNotice('แปลง MP4 ไม่สำเร็จ ดาวน์โหลดวิดีโอสำรองแบบ WebM โดยไม่มีเสียงแล้ว กรุณาลองใหม่');
+      }).finally(() => setConverting(false));
+    };
     let raf = 0; const draw = () => { drawExportFrameRef.current(ctx, W, H); raf = requestAnimationFrame(draw); };
-    recorderRef.current = rec; exportStopRef.current = () => { try { rec.stop(); } catch { /* noop */ } };
+    recorderRef.current = rec; exportStopRef.current = () => { if (rec.state !== 'inactive') rec.stop(); };
     rec.start(250); draw(); setRecording(true); seek(0);
     if (audioRef.current && audioUrl) void audioRef.current.play().catch(() => {}); else setPlaying(true);
-    setNotice("Recording export… it plays in real time. Press Stop Export when the song ends. · กำลังบันทึกวิดีโอแบบเรียลไทม์");
+    setNotice("กำลังบันทึกวิดีโอแบบเรียลไทม์ เมื่อเพลงจบระบบจะแปลงเป็น MP4 อัตโนมัติ");
   };
 
   const set = (patch: Partial<TextStyle>) => setTs((s) => ({ ...s, ...patch }));
@@ -607,7 +648,7 @@ export default function App() {
             <label className="flex items-center gap-1.5 text-[11px] font-semibold" title={titleAttr("Include audio in export", "ใส่เสียงในวิดีโอที่ส่งออก")}><input type="checkbox" checked={includeAudio} onChange={(e) => setIncludeAudio(e.target.checked)} className="accent-[#8B5CF6]" /> Audio</label>
             <select value={exportQuality} onChange={(e) => setExportQuality(e.target.value as "1080p" | "720p")} className="!w-auto" title={titleAttr("Export quality", "คุณภาพวิดีโอ")}><option value="1080p">1080p</option><option value="720p">720p</option></select>
             {recording ? (<button onClick={() => exportStopRef.current?.()} className="flex items-center gap-1.5 rounded-lg bg-red-500 px-3 py-1.5 text-[11px] font-bold text-white">■ Stop Export</button>) : (
-              <button onClick={startExport} disabled={!lyrics.length && !backgrounds.length} className="flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-3 py-1.5 text-[11px] font-bold text-white shadow-[0_0_16px_rgba(139,92,246,.45)] disabled:opacity-40" title={titleAttr("Record & export video (WebM)", "บันทึกและส่งออกวิดีโอ")}><Download className="h-3.5 w-3.5" /> Export {aspect}</button>
+              <button onClick={startExport} disabled={converting || (!lyrics.length && !backgrounds.length)} className="flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-3 py-1.5 text-[11px] font-bold text-white shadow-[0_0_16px_rgba(139,92,246,.45)] disabled:opacity-40" title={titleAttr("Record and export MP4", "ส่งออกวิดีโอ MP4")}><Download className="h-3.5 w-3.5" /> {converting ? 'Converting MP4…' : `Export MP4 ${aspect}`}</button>
             )}
           </div>
         </div>
@@ -1008,7 +1049,7 @@ export default function App() {
       </main>
 
       <footer className="shrink-0 border-t border-[var(--border)] px-4 py-1.5"><p className={`${label} text-center`}>LV Pro Studio V2 — you bring the media, we bring the stage · ไม่ใช้ AI สร้างภาพ ทุกอย่างมาจากไฟล์ของคุณ</p></footer>
-      <audio ref={audioRef} src={audioUrl || undefined} preload="metadata" onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || 0)} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => { if (loopPreview) { seek(0); void audioRef.current?.play().catch(() => {}); } else setPlaying(false); }} className="hidden" />
+      <audio ref={audioRef} src={audioUrl || undefined} preload="metadata" onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || 0)} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => { if (recording) { exportStopRef.current?.(); } else if (loopPreview) { seek(0); void audioRef.current?.play().catch(() => {}); } else setPlaying(false); }} className="hidden" />
     </div>
   );
 }
