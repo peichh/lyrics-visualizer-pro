@@ -4,6 +4,8 @@ export type LyricFrame = {
   text: string;
   elapsed: number;
   duration: number;
+  currentTime?: number;
+  wordTimings?: Array<{text:string;start:number;end:number}>;
   style: TextStyle;
   referenceWidth: number;
 };
@@ -30,7 +32,18 @@ export function drawLyricFrame(ctx: CanvasRenderingContext2D, width: number, hei
   const text = s.uppercase ? frame.text.toUpperCase() : frame.text;
   const time = Math.max(0, frame.elapsed);
   const duration = Math.max(.05, frame.duration);
-  const progress = clamp(time / duration * s.animSpeed);
+  let progress = clamp(time / duration * s.animSpeed);
+  const wordTimings = frame.wordTimings?.filter(word => Number.isFinite(word.start) && Number.isFinite(word.end) && word.end > word.start);
+  if (wordTimings?.length) {
+    const audioTime = frame.currentTime ?? frame.elapsed;
+    const index = wordTimings.findIndex(word => audioTime < word.end);
+    if (index < 0) progress = 1;
+    else {
+      const word = wordTimings[index];
+      const withinWord = clamp((audioTime - word.start) / (word.end - word.start));
+      progress = (index + withinWord) / wordTimings.length;
+    }
+  }
   const letterSpacing = s.letterSpacing * scale * s.scale;
   const maxWidth = width * (s.textWidth === 'full' ? .92 : s.textWidth === '80' ? .8 : .85) * s.scale;
   const padding = (s.boxOpacity ? s.boxPadding : 8) * scale * s.scale;
@@ -143,7 +156,11 @@ export function drawLyricFrame(ctx: CanvasRenderingContext2D, width: number, hei
       for (const word of words(full)) {
         const wordWidth = measure(word);
         if (!word.trim()) { cursor += wordWidth; continue; }
-        const phase = clamp((time * s.animSpeed - wordIndex * duration / wordCount) / .35);
+        const timedWord = wordTimings?.[wordIndex];
+        const audioTime = frame.currentTime ?? frame.elapsed;
+        const phase = timedWord
+          ? clamp((audioTime - timedWord.start) / Math.max(.08, timedWord.end - timedWord.start))
+          : clamp((time * s.animSpeed - wordIndex * duration / wordCount) / .35);
         if (phase > 0) {
           const bounce = s.animation === 'Bounce Pop' ? 1 + Math.sin(phase * Math.PI) * .25 : .8 + .2 * phase;
           ctx.save();
