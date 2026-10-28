@@ -2,6 +2,7 @@ import { CloudPanel } from "./CloudPanel";
 import { parseTimestampedLyrics } from "./lyrics-parser.mjs";
 import { drawGrain, drawLyricFrame } from './lyric-renderer';
 import { prepareWhisperAudio } from './audioWav';
+import { alignLyricWords } from './word-align.mjs';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Upload, FileText, Play, Pause, Sparkles, Download, Music2, Image as ImageIcon, Film,
@@ -70,6 +71,15 @@ function getFfmpeg(): Promise<FfmpegEngine> {
     throw error;
   });
   return ffmpegLoading;
+}
+
+function joinTranscriptWords(words: WordTiming[]): string {
+  return words.reduce((line, word) => {
+    const text = word.text.trim();
+    if (!text) return line;
+    const punctuation = /^[,.;:!?。？！、，）)\]}…]/u.test(text);
+    return `${line}${line && !punctuation ? ' ' : ''}${text}`;
+  }, '');
 }
 
 const DEFAULT_STYLE: TextStyle = {
@@ -370,15 +380,23 @@ export default function App() {
       if (!response.ok) throw new Error(result?.error || `Whisper request failed (${response.status})`);
       if (!Array.isArray(result?.words) || !result.words.length) throw new Error('Whisper ไม่ส่งเวลาแยกระดับคำกลับมา');
       const words: WordTiming[] = result.words.map((word: { text?: unknown; start?: unknown; end?: unknown }) => ({ text: String(word.text || ''), start: Number(word.start), end: Number(word.end) })).filter((word: WordTiming) => word.text && Number.isFinite(word.start) && Number.isFinite(word.end) && word.end > word.start).sort((a: WordTiming, b: WordTiming) => a.start - b.start);
+      if (lyrics.length) {
+        const aligned = alignLyricWords(lyrics, words) as Lyric[];
+        if (aligned.some(cue => cue.wordTimings?.length)) {
+          pushHistory(); setLyrics(aligned); setLyricSource(`${lyricSource} · Whisper word timing`);
+          setNotice(`Whisper จับเวลา ${words.length} คำ ผูกกับเนื้อเพลงเดิม ${aligned.length} ท่อนแล้ว · ตรวจและแก้เวลาได้ก่อนส่งออก`);
+          return;
+        }
+      }
       const groups: WordTiming[][] = [];
       for (const word of words) {
         const group = groups[groups.length - 1];
-        const currentText = group?.map(item => item.text).join('') || '';
+        const currentText = group ? joinTranscriptWords(group) : '';
         const gap = group ? word.start - group[group.length - 1].end : 0;
         const boundary = !!group && (/[.!?。？！]$/.test(currentText.trim()) || gap > 0.55 || group.length >= 6 || currentText.length > 30);
         if (!group || boundary) groups.push([word]); else group.push(word);
       }
-      const cues: Lyric[] = groups.map(group => ({ id: nid('l'), time: group[0].start, text: group.map(word => word.text).join('').trim(), wordTimings: group }));
+      const cues: Lyric[] = groups.map(group => ({ id: nid('l'), time: group[0].start, text: joinTranscriptWords(group), wordTimings: group.map(word => ({ ...word, text: word.text.trim() })) }));
       pushHistory(); setLyrics(cues); setLyricSource(`${audioFile.name} · Whisper word timing`);
       setNotice(`Whisper จับเวลา ${words.length} คำ ได้ ${cues.length} ท่อน · ตรวจและแก้เวลาได้ก่อนส่งออก`);
     } catch (error) {
