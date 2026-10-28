@@ -41,6 +41,37 @@ export type TextStyle = {
 };
 type Preset = { name: string; artist: string; dot: string; style: Partial<TextStyle> };
 
+type FfmpegEngine = import('@ffmpeg/ffmpeg').FFmpeg;
+let ffmpegEngine: FfmpegEngine | null = null;
+let ffmpegLoading: Promise<FfmpegEngine> | null = null;
+
+function getFfmpeg(): Promise<FfmpegEngine> {
+  if (ffmpegEngine?.loaded) return Promise.resolve(ffmpegEngine);
+  if (ffmpegLoading) return ffmpegLoading;
+  ffmpegLoading = (async () => {
+    const { FFmpeg } = await import('@ffmpeg/ffmpeg');
+    const engine = new FFmpeg();
+    const base = new URL(`${import.meta.env.BASE_URL}ffmpeg/`, location.origin);
+    const [coreResponse, wasmResponse] = await Promise.all([
+      fetch(new URL('ffmpeg-core.js', base), { cache: 'force-cache' }),
+      fetch(new URL('ffmpeg-core.wasm.gz', base), { cache: 'force-cache' }),
+    ]);
+    if (!coreResponse.ok || !wasmResponse.ok) throw new Error('Cannot load MP4 encoder');
+    const compressed = await wasmResponse.blob();
+    if (!('DecompressionStream' in globalThis)) throw new Error('This browser cannot load the compressed MP4 encoder');
+    const decompressed = new Response(compressed.stream().pipeThrough(new DecompressionStream('gzip')));
+    const wasmURL = URL.createObjectURL(await decompressed.blob());
+    try { await engine.load({ coreURL: new URL('ffmpeg-core.js', base).href, wasmURL }); }
+    finally { URL.revokeObjectURL(wasmURL); }
+    ffmpegEngine = engine;
+    return engine;
+  })().catch((error) => {
+    ffmpegLoading = null;
+    throw error;
+  });
+  return ffmpegLoading;
+}
+
 const DEFAULT_STYLE: TextStyle = {
   fontFamily: "Inter", fontSize: 48, scale: 1, weight: 700, italic: false,
   letterSpacing: 0, lineHeight: 1.25, color: "#FFFFFF", opacity: 1,
@@ -511,6 +542,7 @@ export default function App() {
     const mime = MediaRecorder.isTypeSupported("video/webm;codecs=vp9") ? "video/webm;codecs=vp9" : "video/webm";
     if (!MediaRecorder.isTypeSupported(mime)) { setNotice("This browser cannot record video. Please try Chrome or Edge. · เบราว์เซอร์นี้ไม่รองรับการบันทึกวิดีโอ"); return; }
     const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8_000_000 });
+    void getFfmpeg().catch(() => {});
     chunksRef.current = [];
     rec.ondataavailable = (e) => { if (e.data.size) chunksRef.current.push(e.data); };
     rec.onstop = () => {
@@ -518,24 +550,17 @@ export default function App() {
       audioRef.current?.pause(); setPlaying(false); setRecording(false); setConverting(true);
       const blob = new Blob(chunksRef.current, { type: mime });
       void (async () => {
-        const { FFmpeg } = await import('@ffmpeg/ffmpeg');
         const { fetchFile } = await import('@ffmpeg/util');
-        const ffmpeg = new FFmpeg();
+        setNotice('กำลังเตรียมภาพและเสียงสำหรับ MP4…');
+        const ffmpeg = await getFfmpeg();
+        const onProgress = ({progress}: {progress: number}) => setNotice(`กำลังแปลง MP4 ${Math.min(99, Math.max(0, Math.round(progress * 100)))}% · โปรดเปิดหน้านี้ไว้`);
         try {
-          setNotice('กำลังเตรียมตัวแปลง MP4 และประมวลผลวิดีโอในเบราว์เซอร์ โปรดเปิดหน้านี้ไว้');
-          const base = `${import.meta.env.BASE_URL}ffmpeg/`;
-          const responses = await Promise.all(['core-part-0.bin', 'core-part-1.bin'].map(part => fetch(base + part)));
-          if (responses.some(response => !response.ok)) throw new Error('Cannot load MP4 encoder');
-          setNotice('กำลังโหลดตัวเข้ารหัส MP4…');
-          const wasmURL = URL.createObjectURL(new Blob(await Promise.all(responses.map(response => response.arrayBuffer())), {type:'application/wasm'}));
-          const coreURL = new URL(base + 'ffmpeg-core.js', location.href).href;
-          try { await ffmpeg.load({ coreURL, wasmURL }); } finally { URL.revokeObjectURL(wasmURL); }
           setNotice('กำลังเตรียมภาพและเสียงสำหรับ MP4…');
           await ffmpeg.writeFile('video.webm', await fetchFile(blob));
           const args = ['-i', 'video.webm'];
           if (includeAudio && audioUrl) { await ffmpeg.writeFile('audio.input', await fetchFile(audioUrl)); args.push('-i', 'audio.input', '-map', '0:v:0', '-map', '1:a:0', '-c:a', 'aac', '-shortest'); }
-          args.push('-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', 'output.mp4');
-          ffmpeg.on('progress', ({progress}) => setNotice(`กำลังแปลง MP4 ${Math.min(99, Math.max(0, Math.round(progress * 100)))}% · โปรดเปิดหน้านี้ไว้`));
+          args.push('-c:v', 'libx264', '-preset', 'ultrafast', '-r', '30', '-fps_mode', 'cfr', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', 'output.mp4');
+          ffmpeg.on('progress', onProgress);
           setNotice('กำลังแปลง MP4 · โปรดเปิดหน้านี้ไว้');
           const result = await ffmpeg.exec(args);
           if (result !== 0) throw new Error('MP4 conversion failed');
@@ -545,7 +570,10 @@ export default function App() {
           const a = document.createElement('a'); a.href = url; a.download = `lyrics-visualizer-${exportQuality}-${aspect.replace(':','x')}.mp4`; a.click();
           setTimeout(() => URL.revokeObjectURL(url), 60000);
           setNotice('ดาวน์โหลด MP4 แล้ว · MP4 export complete');
-        } finally { ffmpeg.terminate(); }
+        } finally {
+          ffmpeg.off('progress', onProgress);
+          await Promise.all(['video.webm', 'audio.input', 'output.mp4'].map(name => ffmpeg.deleteFile(name).catch(() => {})));
+        }
       })().catch((error) => {
         console.error('MP4 export failed', error);
         const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'lyrics-visualizer-recovery.webm'; a.click();
