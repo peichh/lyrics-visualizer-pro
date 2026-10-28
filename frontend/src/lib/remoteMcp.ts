@@ -53,6 +53,8 @@ export async function connectRemoteMcp(endpoint: string, token: string) {
     const tools = toolsFrom(await post(endpoint, token, { jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }, modern));
     return { tools, connection: modern };
   } catch (error) {
+    const reason = error instanceof Error ? error.message : '';
+    if (!/MCP HTTP (400|404)|method not found|not initialized|unsupported protocol/i.test(reason)) throw error;
     // Older stateful Streamable HTTP servers require the 2025 initialize handshake.
     const legacy: RemoteMcpConnection = { protocol: '2025-03-26' };
     const initialized = await post(endpoint, token, {
