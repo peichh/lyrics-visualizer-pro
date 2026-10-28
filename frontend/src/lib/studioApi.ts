@@ -17,7 +17,7 @@ export class StudioApi {
   }
   private async json<T>(path: string, method = 'GET', value?: unknown): Promise<T> {
     const response = await this.request(this.origin + path, {
-      method, credentials:'include', redirect:'error', signal:AbortSignal.timeout(30000),
+      method, credentials:'omit', redirect:'error', signal:AbortSignal.timeout(30000),
       headers:{...(this.token ? {Authorization:`Bearer ${this.token}`} : {}), ...(value === undefined ? {} : {'Content-Type':'application/json'})},
       body:value === undefined ? undefined : JSON.stringify(value),
     });
@@ -29,7 +29,7 @@ export class StudioApi {
   static async createAccount(origin:string):Promise<AccountCredentials>{
     const url=new URL(origin);
     if(url.protocol!=='https:'&&!(url.protocol==='http:'&&['localhost','127.0.0.1'].includes(url.hostname)))throw new Error('Account creation requires HTTPS');
-    const response=await fetch(url.origin+'/api/account',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:'{}'});
+    const response=await fetch(url.origin+'/api/account',{method:'POST',credentials:'omit',headers:{'Content-Type':'application/json'},body:'{}'});
     const body=await response.json().catch(()=>null);if(!response.ok)throw new StudioApiError(body?.error||`Account creation failed (${response.status})`,response.status);if(!body?.apiKey)throw new StudioApiError('The account service returned an invalid response',502);return body as AccountCredentials;
   }
   listProjects() { return this.json<CloudProject[]>('/api/projects'); }
