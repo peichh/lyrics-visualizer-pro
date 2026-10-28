@@ -22,6 +22,7 @@ export function CloudPanel({snapshot,restore}:Props) {
     finally {setBusy(false);}
   }
   async function refresh(api:StudioApi,project:CloudProject) {
+    if (!isOwner) { setProposals([]); return; }
     setProposals((await api.listProposals(project.id)).proposals);
   }
   const draft=snapshot();
@@ -30,6 +31,7 @@ export function CloudPanel({snapshot,restore}:Props) {
   return <section className="space-y-4" aria-label="Cloud storage">
     <h2 className="mono text-sm">CLOUD STORAGE</h2>
     <p className="text-xs">บันทึกและเปิดงานบนคลาวด์ได้จากที่นี่</p>
+    {newKey && <article className="space-y-2 border border-[var(--border)] p-3"><strong className="text-xs">Cloud storage key ส่วนตัว</strong><p className="text-xs">คีย์นี้ใช้เฉพาะกับบัญชีคลาวด์ของคุณ ไม่ใช่คีย์กลาง และไม่ใช่ข้อมูลเชื่อม MCP ภายนอก</p><code className="block break-all text-xs">{newKey}</code><button className={button} onClick={()=>void navigator.clipboard.writeText(newKey)}>คัดลอก API key</button></article>}
     {!client?<><form className="space-y-3" onSubmit={e=>{e.preventDefault();void run(async()=>{
       const api=new StudioApi(origin,token || undefined);setProjects(await api.listProjects());const role=await api.accountInfo();setIsOwner(role.isOwner);setClient(api);if(token)localStorage.setItem('lyrics-studio-account-key',token);setMessage('เชื่อมต่อแล้ว เลือกงานหรือบันทึกเป็นงานใหม่');
     });}}>
@@ -41,7 +43,6 @@ export function CloudPanel({snapshot,restore}:Props) {
       const account=await StudioApi.createAccount(origin);setNewKey(account.apiKey);setToken(account.apiKey);localStorage.setItem('lyrics-studio-account-key',account.apiKey);
       const api=new StudioApi(origin,account.apiKey);setProjects(await api.listProjects());const role=await api.accountInfo();setIsOwner(role.isOwner);setClient(api);setMessage('สร้างบัญชีแล้ว คัดลอก API key ไปเก็บก่อนออกจากหน้านี้');
     })}>สร้างบัญชีใหม่</button></>:<>
-      {newKey && <article className="space-y-2 border border-[var(--border)] p-3"><strong className="text-xs">Cloud storage key ส่วนตัว</strong><p className="text-xs">คีย์นี้ใช้เฉพาะกับบัญชีคลาวด์ของคุณ ไม่ใช่คีย์กลาง และไม่ใช่ข้อมูลเชื่อม MCP ภายนอก</p><code className="block break-all text-xs">{newKey}</code><button className={button} onClick={()=>void navigator.clipboard.writeText(newKey)}>คัดลอก API key</button></article>}
       <button disabled={busy} className={button} onClick={()=>void run(async()=>{
         const current=snapshot();
         const saved=active?await client.saveProject({...current,id:active.id,revision:active.revision} as CloudProject):await client.createProject(current);

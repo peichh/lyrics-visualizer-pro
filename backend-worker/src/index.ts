@@ -14,10 +14,25 @@ const trustedOrigin=(origin:string,frontEnd:string)=>{try{const url=new URL(orig
 const isOwner=async(c:any,key:string)=>!!c.env.OWNER_API_KEY_HASH&&secureEqual(await hash(key),c.env.OWNER_API_KEY_HASH);
 const clientIp=(c:any)=>c.req.header('CF-Connecting-IP')||'unknown';
 const validateMcpOrigin=async(c:any,next:()=>Promise<void>)=>{const origin=c.req.header('Origin');if(origin&&!trustedOrigin(origin,c.env.FRONTEND_URL))return c.json({error:'Origin not allowed'},403);await next();};
+const validateBrowserOrigin=async(c:any,next:()=>Promise<void>)=>{const origin=c.req.header('Origin');if(origin&&!trustedOrigin(origin,c.env.FRONTEND_URL))return c.json({error:'Origin not allowed'},403);await next();};
+const limitRequestBody=(maxBytes:number)=>(c:any,next:()=>Promise<void>)=>{const length=Number(c.req.header('Content-Length')||0);if(Number.isFinite(length)&&length>maxBytes)return c.json({error:'Request body is too large'},413);return next();};
 app.use('/mcp',validateMcpOrigin);
 app.use('/mcp/*',validateMcpOrigin);
 
-app.use('/*',cors({origin:(origin,c)=>!origin?(c.env.FRONTEND_URL||'*'):trustedOrigin(origin,c.env.FRONTEND_URL)?origin:'null',allowMethods:['GET','POST','PUT','DELETE','OPTIONS'],allowHeaders:['Content-Type','Authorization','MCP-Protocol-Version','Mcp-Method','Mcp-Name','Mcp-Session-Id']}));
+app.use('/*',cors({origin:(origin,c)=>origin&&trustedOrigin(origin,c.env.FRONTEND_URL)?origin:undefined,allowMethods:['GET','POST','PUT','DELETE','OPTIONS'],allowHeaders:['Content-Type','Authorization','MCP-Protocol-Version','Mcp-Method','Mcp-Name','Mcp-Session-Id'],maxAge:600}));
+app.use('/*',async(c,next)=>{
+  await next();
+  c.header('X-Content-Type-Options','nosniff');
+  c.header('Referrer-Policy','no-referrer');
+  c.header('Cache-Control','no-store');
+});
+app.use('/api/account',validateBrowserOrigin);
+app.use('/api/transcribe',validateBrowserOrigin);
+app.use('/api/projects',limitRequestBody(2*1024*1024));
+app.use('/api/projects/*',limitRequestBody(2*1024*1024));
+app.use('/api/proposals',limitRequestBody(512*1024));
+app.use('/api/proposals/*',limitRequestBody(512*1024));
+app.use('/mcp',limitRequestBody(1024*1024));
 
 // Each person gets a random API key once. Only its hash is stored.
 app.post('/api/account',async c=>{

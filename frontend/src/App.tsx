@@ -199,7 +199,7 @@ function MediaLayer({ item, active, fade, registerRef }: { item: BgItem; active:
     [vA.current, vB.current].forEach((v) => { if (!v) return; if (active) { v.play().catch(() => {}); } else v.pause(); });
   }, [active, item.kind]);
   useEffect(() => {
-    if (item.kind !== "video") return;
+    if (item.kind !== "video" || !active) return;
     let raf = 0;
     const tick = () => {
       const a = vA.current, b = vB.current;
@@ -458,7 +458,34 @@ export default function App() {
     }
   }, [playing, audioUrl, totalDur, loopPreview, recording]);
   useEffect(() => { if (recording && !audioUrl && currentTime >= totalDur) exportStopRef.current?.(); }, [recording, audioUrl, currentTime, totalDur]);
-  useEffect(() => { let raf = 0; const loop = () => { const a = audioRef.current; if (a && audioUrl && !a.paused) setCurrentTime(a.currentTime); raf = requestAnimationFrame(loop); }; raf = requestAnimationFrame(loop); return () => cancelAnimationFrame(raf); }, [audioUrl]);
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio || !audioUrl) return;
+    let raf = 0;
+    let lastPaint = 0;
+    const stop = () => { if (raf) cancelAnimationFrame(raf); raf = 0; };
+    const tick = (now: number) => {
+      if (audio.paused || audio.ended) { stop(); setCurrentTime(audio.currentTime); return; }
+      // Lyrics and waveform stay smooth at 30 fps without rerendering the full
+      // editor on every display refresh. No animation loop runs while paused.
+      if (now - lastPaint >= 1000 / 30) { lastPaint = now; setCurrentTime(audio.currentTime); }
+      raf = requestAnimationFrame(tick);
+    };
+    const start = () => { if (!raf) raf = requestAnimationFrame(tick); };
+    const sync = () => setCurrentTime(audio.currentTime);
+    audio.addEventListener("play", start);
+    audio.addEventListener("pause", sync);
+    audio.addEventListener("seeked", sync);
+    audio.addEventListener("ended", sync);
+    if (!audio.paused) start();
+    return () => {
+      stop();
+      audio.removeEventListener("play", start);
+      audio.removeEventListener("pause", sync);
+      audio.removeEventListener("seeked", sync);
+      audio.removeEventListener("ended", sync);
+    };
+  }, [audioUrl]);
   const seek = (t: number) => { const c = Math.max(0, Math.min(totalDur, t)); setCurrentTime(c); if (audioRef.current) audioRef.current.currentTime = c; };
   useEffect(() => {
     const root = appRootRef.current;
