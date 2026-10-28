@@ -1,5 +1,6 @@
 export type CloudProject = { id: string; title: string; revision: number; lyrics: Array<{id:string;text:string;time:number;endTime?:number}>; [key:string]:unknown };
 export type AIProposal = {id:string;project_id:string;summary:string;status:'pending'|'approved'|'rejected';base_revision:number;changes:Array<Record<string,unknown>>};
+export type AccountCredentials = {id:string;apiKey:string;message:string};
 
 export class StudioApiError extends Error {
   constructor(message: string, public status: number) { super(message); }
@@ -24,6 +25,12 @@ export class StudioApi {
     if (!response.ok) throw new StudioApiError(body?.error || `Cloud request failed (${response.status})`, response.status);
     if (!body || typeof body !== 'object') throw new StudioApiError('Invalid cloud response',502);
     return body as T;
+  }
+  static async createAccount(origin:string):Promise<AccountCredentials>{
+    const url=new URL(origin);
+    if(url.protocol!=='https:'&&!(url.protocol==='http:'&&['localhost','127.0.0.1'].includes(url.hostname)))throw new Error('Account creation requires HTTPS');
+    const response=await fetch(url.origin+'/api/account',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:'{}'});
+    const body=await response.json();if(!response.ok)throw new StudioApiError(body?.error||'Account creation failed',response.status);return body as AccountCredentials;
   }
   listProjects() { return this.json<CloudProject[]>('/api/projects'); }
   createProject(project: Omit<CloudProject,'id'>) { return this.json<CloudProject>('/api/projects','POST',project); }
