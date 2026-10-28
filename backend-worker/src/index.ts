@@ -9,8 +9,12 @@ type Bindings = { DB: D1Database; FRONTEND_URL: string; AI?: WorkersAI };
 type Variables = { userId: string };
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 const hash = async (value: string) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value))),b=>b.toString(16).padStart(2,'0')).join('');
+const trustedOrigin=(origin:string,frontEnd:string)=>{try{const url=new URL(origin);return origin===frontEnd||url.hostname.endsWith('.lyrics-visualizer-pro.pages.dev')||['localhost','127.0.0.1'].includes(url.hostname);}catch{return false;}};
+const validateMcpOrigin=async(c:any,next:()=>Promise<void>)=>{const origin=c.req.header('Origin');if(origin&&!trustedOrigin(origin,c.env.FRONTEND_URL))return c.json({error:'Origin not allowed'},403);await next();};
+app.use('/mcp',validateMcpOrigin);
+app.use('/mcp/*',validateMcpOrigin);
 
-app.use('/*',cors({origin:(origin,c)=>{if(!origin)return c.env.FRONTEND_URL||'*';try{const u=new URL(origin);return origin===c.env.FRONTEND_URL||u.hostname.endsWith('.lyrics-visualizer-pro.pages.dev')||['localhost','127.0.0.1'].includes(u.hostname)?origin:'null';}catch{return 'null';}},allowMethods:['GET','POST','PUT','DELETE','OPTIONS'],allowHeaders:['Content-Type','Authorization']}));
+app.use('/*',cors({origin:(origin,c)=>!origin?(c.env.FRONTEND_URL||'*'):trustedOrigin(origin,c.env.FRONTEND_URL)?origin:'null',allowMethods:['GET','POST','PUT','DELETE','OPTIONS'],allowHeaders:['Content-Type','Authorization','MCP-Protocol-Version','Mcp-Method','Mcp-Name','Mcp-Session-Id']}));
 
 // Each person gets a random API key once. Only its hash is stored.
 app.post('/api/account',async c=>{
@@ -113,6 +117,16 @@ app.get('/mcp',()=>new Response(null,{status:405,headers:{Allow:'POST'}}));
 app.post('/mcp',async c=>{
   if(!c.req.header('Content-Type')?.includes('application/json'))return c.json({error:'JSON required'},415);
   let input;try{input=await c.req.json();}catch{return c.json({jsonrpc:'2.0',id:null,error:{code:-32700,message:'Parse error'}},400);}
+  const protocolVersion=c.req.header('MCP-Protocol-Version');
+  const protocolError=(message:string,data?:unknown)=>c.json({jsonrpc:'2.0',id:(input as any)?.id??null,error:{code:-32600,message,...(data===undefined?{}:{data})}},400);
+  if(protocolVersion&&!['2026-07-28','2025-03-26'].includes(protocolVersion))return protocolError('UnsupportedProtocolVersionError',{supportedVersions:['2026-07-28','2025-03-26']});
+  if(protocolVersion==='2026-07-28'&&!Array.isArray(input)){
+    const message=input as Record<string,any>;
+    const metadataVersion=message.params?._meta?.['io.modelcontextprotocol/protocolVersion'];
+    if(metadataVersion!==protocolVersion)return protocolError('HeaderMismatch: MCP-Protocol-Version does not match request metadata');
+    if(c.req.header('Mcp-Method')!==message.method)return protocolError('HeaderMismatch: Mcp-Method does not match request method');
+    if(message.method==='tools/call'&&c.req.header('Mcp-Name')!==message.params?.name)return protocolError('HeaderMismatch: Mcp-Name does not match tool name');
+  }
   const userId=c.get('userId');
   const call=async(name:string,args:Record<string,unknown>)=>{
     if(name==='list_projects'){
