@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { authorized, proposalRoutes } from './proposalRoutes';
+import { validateProject } from './projectValidation';
 
 type Bindings = { DB: D1Database; FRONTEND_URL: string; OWNER_TOKEN: string; AI_TOKEN: string; }
 const app = new Hono<{ Bindings: Bindings }>();
@@ -55,6 +56,31 @@ app.post('/mcp/chat', c => c.json({error:'Chat provider is not configured. No pr
 app.get('/api/projects', async (c) => {
   const { results } = await c.env.DB.prepare('SELECT data FROM projects').all();
   return c.json(results.map((r:any) => JSON.parse(r.data)));
+});
+
+app.post('/api/projects', async c => {
+  try {
+    const project = validateProject(await c.req.json());
+    const id = crypto.randomUUID();
+    const saved = {...project,id,revision:0};
+    await c.env.DB.prepare('INSERT INTO projects(id,data) VALUES(?,?)').bind(id,JSON.stringify(saved)).run();
+    return c.json(saved,201);
+  } catch { return c.json({error:'Invalid project'},400); }
+});
+
+app.put('/api/projects/:id', async c => {
+  let project;
+  try { project = validateProject(await c.req.json()); }
+  catch { return c.json({error:'Invalid project'},400); }
+  const id = c.req.param('id');
+  const row = await c.env.DB.prepare('SELECT data FROM projects WHERE id = ?').bind(id).first<{data:string}>();
+  if (!row) return c.json({error:'Project not found'},404);
+  const current = JSON.parse(row.data);
+  if (current.revision !== project.revision) return c.json({error:'Project changed; reload before saving'},409);
+  const saved = {...project,id,revision:(project.revision as number)+1};
+  const result = await c.env.DB.prepare('UPDATE projects SET data = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND data = ?').bind(JSON.stringify(saved),id,row.data).run();
+  if (result.meta.changes !== 1) return c.json({error:'Project changed; reload before saving'},409);
+  return c.json(saved);
 });
 
 app.get('/api/projects/:id', async (c) => {
