@@ -9,7 +9,7 @@ export class StudioApiError extends Error {
 /** Token stays in the caller's memory; it is never included in URLs or logs. */
 export class StudioApi {
   private origin: string;
-  constructor(origin: string, private token: string | undefined, private request: typeof fetch = fetch) {
+  constructor(origin: string, private token: string | undefined, private request: typeof fetch = fetch.bind(globalThis)) {
     const url = new URL(origin);
     if (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost','127.0.0.1'].includes(url.hostname))) throw new Error('Cloud API requires HTTPS');
     if (url.username || url.password || url.search || url.hash) throw new Error('Invalid API URL');
