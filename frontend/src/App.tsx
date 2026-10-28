@@ -905,9 +905,9 @@ export default function App() {
           </div>
         </aside>
 
-        {/* CENTER — fixed stage, never scrolls; timeline pinned at bottom */}
-        <section className={`studio-center relative min-h-0 min-w-0 flex-1 flex-col overflow-hidden ${mobileView === "stage" ? "flex max-xl:flex" : "hidden max-xl:hidden"} xl:flex`}>
-          <div className="flex h-12 shrink-0 items-center gap-2 border-b border-[var(--border)] px-3.5">
+        {/* CENTER — preview stays visible while the mobile tool panel changes below it */}
+        <section className={`studio-center relative min-h-0 min-w-0 flex flex-col overflow-hidden ${mobileView === "stage" ? "flex-1 max-xl:flex-1" : "max-xl:h-[52%] max-xl:min-h-[260px] max-xl:flex-none"} xl:flex-1`}>
+          <div className="flex h-12 shrink-0 items-center gap-2 border-b border-[var(--border)] px-3.5 max-xl:h-9 max-xl:px-2">
             <MonitorPlay className="h-4 w-4 shrink-0 text-[var(--accent)]" />
             <span className={`${label} shrink-0`}>Stage</span>
             <span className="shrink-0 rounded bg-[var(--accent)] px-1.5 py-0.5 text-[9px] font-bold text-white">{exportQuality}</span>
@@ -961,7 +961,7 @@ export default function App() {
             </div>
           </div>
 
-          <div className="flex shrink-0 items-center gap-3 px-3.5 py-2">
+          <div className="flex shrink-0 items-center gap-3 px-3.5 py-2 max-xl:gap-2 max-xl:px-2 max-xl:py-1">
             <button onClick={togglePlay} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--accent)] text-white shadow-[0_0_18px_rgba(139,92,246,.5)]" title={titleAttr("Play/Pause (Space)", "เล่น/หยุด (Space)")}>{playing ? <Pause className="h-5 w-5" /> : <Play className="ml-0.5 h-5 w-5" />}</button>
             <span className="mono text-[11px] text-[var(--muted)]">{fmt(currentTime)}</span>
             <input type="range" min={0} max={totalDur || 0} step={0.05} value={currentTime} onChange={(e) => seek(parseFloat(e.target.value))} className="min-w-0 flex-1" title={titleAttr("Scrub timeline", "เลื่อนเวลา")} />
@@ -970,12 +970,12 @@ export default function App() {
           </div>
 
           {/* Timeline pinned inside center bottom — fixed height, horizontal scroll only */}
-          <div className="h-[180px] shrink-0 overflow-hidden border-t border-[var(--border)] bg-[var(--surface)]">
-            <div className="flex items-center gap-2 px-3.5 pt-2">
+          <div className="h-[180px] shrink-0 overflow-hidden border-t border-[var(--border)] bg-[var(--surface)] max-xl:h-[96px]">
+            <div className="flex items-center gap-2 px-3.5 pt-2 max-xl:px-2 max-xl:pt-1">
               <Clock3 className="h-4 w-4 text-[var(--accent)]" /><span className={label}>Timeline · ไทม์ไลน์</span>
               <span className={`${label} ml-auto`}>{lyrics.length} lines · {backgrounds.length} clips</span>
             </div>
-            <div className="thin-scroll h-[calc(180px-34px)] overflow-x-auto overflow-y-hidden px-3.5 pb-2 pt-1.5">
+            <div className="thin-scroll h-[calc(180px-34px)] overflow-x-auto overflow-y-hidden px-3.5 pb-2 pt-1.5 max-xl:h-[calc(96px-22px)] max-xl:px-2 max-xl:pt-1">
               <div className="min-w-[560px]">
                 <Waveform audioUrl={audioUrl} progress={duration ? currentTime / duration : 0} onSeek={(p) => seek(p * totalDur)} tall />
                 <div className="relative mt-1.5 h-12 rounded-lg bg-black/40" title={titleAttr("Drag a block left/right to retime it", "ลากบล็อกซ้าย-ขวาเพื่อปรับเวลา")}>
@@ -1011,17 +1011,17 @@ export default function App() {
               </div>
             </div>
           </div>
-          <p className="shrink-0 border-t border-[var(--border)] px-3.5 py-1 text-center text-[10px] text-[var(--muted)]">Drag lyric text anywhere · Scroll on text to scale · Space = play/pause · ←/→ seek 5s · Ctrl+Z undo · ลากข้อความไปวางตรงไหนก็ได้</p>
+          <p className="shrink-0 border-t border-[var(--border)] px-3.5 py-1 text-center text-[10px] text-[var(--muted)] max-xl:hidden">Drag lyric text anywhere · Scroll on text to scale · Space = play/pause · ←/→ seek 5s · Ctrl+Z undo · ลากข้อความไปวางตรงไหนก็ได้</p>
         </section>
 
         {/* RIGHT — independent scroll, sticky tabs */}
-        <aside className={`studio-sidebar min-h-0 flex-col overflow-hidden border-l border-[var(--border)] bg-[var(--surface)] xl:w-[380px] xl:shrink-0 max-xl:w-full max-xl:border-l-0 max-xl:border-t ${mobileView === "tools" || mobileView === "export" ? "flex max-xl:flex" : "hidden max-xl:hidden"} xl:flex`}>
+        <aside className={`studio-sidebar min-h-0 flex-col overflow-hidden border-l border-[var(--border)] bg-[var(--surface)] xl:w-[380px] xl:shrink-0 max-xl:w-full max-xl:min-h-0 max-xl:flex-1 max-xl:border-l-0 max-xl:border-t ${mobileView === "tools" || mobileView === "export" ? "flex max-xl:flex" : "hidden max-xl:hidden"} xl:flex`}>
           <div className="sticky top-0 z-10 hidden shrink-0 border-b border-[var(--border)] bg-[var(--surface)] xl:flex">
             {([["media", "Media · สื่อ", Music2], ["text", "Text · ตัวอักษร", Type], ["background", "Background · พื้นหลัง", Layers], ["presets", "Presets · พรีเซ็ต", Sparkles], ["cloud", "Cloud · AI", Check]] as const).map(([k, l, Icon]) => (
               <button key={k} onClick={() => setTab(k)} className={`flex flex-1 items-center justify-center gap-1.5 px-1.5 py-2.5 text-[10px] font-bold ${tab === k ? "bg-[var(--accent-soft)] text-white shadow-[inset_0_-2px_0_var(--accent)]" : "text-[var(--muted)] hover:text-white"}`}><Icon className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{l}</span></button>
             ))}
           </div>
-          <div className="thin-scroll min-h-0 flex-1 space-y-4 overflow-y-auto overflow-x-hidden p-3.5">
+          <div className="thin-scroll min-h-0 flex-1 space-y-4 overflow-y-auto overflow-x-hidden p-3.5 max-xl:p-2.5">
             {mobileView === "export" && <section className={`${card} space-y-4 p-4`}>
               <div><p className={`${label} mb-1`}>EXPORT · ส่งออกวิดีโอ</p><p className="text-sm font-semibold">ตั้งค่าขนาดและไฟล์</p></div>
               <div><p className={`${label} mb-2`}>Aspect ratio · อัตราส่วนภาพ</p><div className="flex overflow-hidden rounded-lg border border-[var(--border)]" title={titleAttr("Aspect ratio", "อัตราส่วนภาพ")}>{ASPECTS.map((a) => <button key={a} onClick={() => setAspect(a)} className={`flex-1 px-2.5 py-2 text-xs font-bold ${aspect === a ? "bg-[var(--accent)] text-white" : "bg-[var(--surface2)]"}`}>{a}</button>)}</div></div>
