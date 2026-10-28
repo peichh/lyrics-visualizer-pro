@@ -1,4 +1,5 @@
 import React, {useState} from 'react';
+import {RemoteMcpPanel} from './RemoteMcpPanel';
 
 const DEFAULT_API_URL = import.meta.env.VITE_STUDIO_API_URL || import.meta.env.VITE_BACKEND_URL || 'https://lyrics-studio-multitenant-preview.peich.workers.dev';
 import {StudioApi, type CloudProject, type AIProposal} from './lib/studioApi';
@@ -27,19 +28,20 @@ export function CloudPanel({snapshot,restore}:Props) {
   const button='border border-[var(--border)] px-3 py-2 text-xs disabled:opacity-40';
   return <section className="space-y-4" aria-label="Cloud and AI review">
     <h2 className="mono text-sm">CLOUD / AI REVIEW</h2>
-    <p className="text-xs">AI เสนอการแก้ไขได้ พี่ตรวจรายละเอียดและกดยืนยันก่อนใช้กับงาน</p>
+    <p className="text-xs">เชื่อม MCP server ของคุณเองได้ และตรวจข้อเสนอ AI ก่อนกดยืนยันทุกครั้ง</p>
+    <RemoteMcpPanel />
     {!client?<><form className="space-y-3" onSubmit={e=>{e.preventDefault();void run(async()=>{
       const api=new StudioApi(origin,token || undefined);setProjects(await api.listProjects());setClient(api);if(token)localStorage.setItem('lyrics-studio-account-key',token);setMessage('เชื่อมต่อแล้ว เลือกงานหรือบันทึกเป็นงานใหม่');
     });}}>
       <label className="block text-xs">API URL<input required type="url" value={origin} onChange={e=>setOrigin(e.target.value)} placeholder="https://your-api.workers.dev" className="mt-1 w-full border p-2" readOnly={!!import.meta.env.VITE_STUDIO_API_URL}/></label>
-      <label className="block text-xs">API key ส่วนตัวของคุณ<input required type="password" autoComplete="off" value={token} onChange={e=>setToken(e.target.value)} className="mt-1 w-full border p-2"/></label>
-      <p className="text-xs text-[var(--muted)]">แต่ละบัญชีมี key ของตัวเอง ใช้เชื่อมเว็บและ MCP โดยข้อมูลแยกตามบัญชี</p>
+      <label className="block text-xs">Cloud storage key ส่วนตัวของคุณ (ถ้ามี)<input type="password" autoComplete="off" value={token} onChange={e=>setToken(e.target.value)} className="mt-1 w-full border p-2"/></label>
+      <p className="text-xs text-[var(--muted)]">ไม่ต้องใช้คีย์กลางของเจ้าของเว็บ สร้างบัญชีส่วนตัวเพื่อบันทึกงานบนคลาวด์ หรือเชื่อม MCP ของคุณด้านบน</p>
       <button disabled={busy} className={button}>เชื่อมต่อ</button>
     </form><button disabled={busy} className={button} onClick={()=>void run(async()=>{
       const account=await StudioApi.createAccount(origin);setNewKey(account.apiKey);setToken(account.apiKey);localStorage.setItem('lyrics-studio-account-key',account.apiKey);
       const api=new StudioApi(origin,account.apiKey);setProjects(await api.listProjects());setClient(api);setMessage('สร้างบัญชีแล้ว คัดลอก API key ไปเก็บก่อนออกจากหน้านี้');
     })}>สร้างบัญชีใหม่</button></>:<>
-      <article className="space-y-2 border border-[var(--border)] p-3"><strong className="text-xs">เชื่อม MCP ส่วนตัว</strong><p className="break-all text-xs">MCP URL: {origin}/mcp</p><p className="text-xs">ใช้ API key ของบัญชีนี้เป็น Bearer token ใน MCP client ของคุณ</p>{newKey && <><code className="block break-all text-xs">{newKey}</code><button className={button} onClick={()=>void navigator.clipboard.writeText(newKey)}>คัดลอก API key</button></>}</article>
+      {newKey && <article className="space-y-2 border border-[var(--border)] p-3"><strong className="text-xs">Cloud storage key ส่วนตัว</strong><p className="text-xs">คีย์นี้ใช้เฉพาะกับบัญชีคลาวด์ของคุณ ไม่ใช่คีย์กลาง และไม่ใช่ข้อมูลเชื่อม MCP ภายนอก</p><code className="block break-all text-xs">{newKey}</code><button className={button} onClick={()=>void navigator.clipboard.writeText(newKey)}>คัดลอก API key</button></article>}
       <button disabled={busy} className={button} onClick={()=>void run(async()=>{
         const current=snapshot();
         const saved=active?await client.saveProject({...current,id:active.id,revision:active.revision} as CloudProject):await client.createProject(current);
