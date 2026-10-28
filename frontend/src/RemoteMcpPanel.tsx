@@ -1,5 +1,5 @@
 import React, {useState} from 'react';
-import {callRemoteMcpTool, connectRemoteMcp, type RemoteMcpTool} from './lib/remoteMcp';
+import {callRemoteMcpTool, connectRemoteMcp, type RemoteMcpConnection, type RemoteMcpTool} from './lib/remoteMcp';
 
 const button = 'border border-[var(--border)] px-3 py-2 text-xs disabled:opacity-40';
 const SAVED_URL = 'lyrics-studio:remote-mcp-url';
@@ -8,6 +8,7 @@ export function RemoteMcpPanel() {
   const [endpoint, setEndpoint] = useState(localStorage.getItem(SAVED_URL) || '');
   const [token, setToken] = useState(sessionStorage.getItem('lyrics-studio:remote-mcp-token') || '');
   const [tools, setTools] = useState<RemoteMcpTool[]>([]);
+  const [connection, setConnection] = useState<RemoteMcpConnection|null>(null);
   const [toolName, setToolName] = useState('');
   const [args, setArgs] = useState('{}');
   const [result, setResult] = useState('');
@@ -28,19 +29,20 @@ export function RemoteMcpPanel() {
       <button className={button} disabled={busy || !endpoint} onClick={()=>void run(async()=>{
         const url = new URL(endpoint);
         if (url.protocol !== 'https:' && !['localhost', '127.0.0.1'].includes(url.hostname)) throw new Error('MCP URL ต้องเป็น HTTPS');
-        const found = await connectRemoteMcp(endpoint, token);
-        setTools(found); setToolName(found[0]?.name || ''); setResult('');
+        const connected = await connectRemoteMcp(endpoint, token);
+        const found=connected.tools;
+        setConnection(connected.connection); setTools(found); setToolName(found[0]?.name || ''); setResult('');
         localStorage.setItem(SAVED_URL, endpoint);
         if (token) sessionStorage.setItem('lyrics-studio:remote-mcp-token', token); else sessionStorage.removeItem('lyrics-studio:remote-mcp-token');
-        setMessage(`เชื่อมต่อแล้ว · พบ ${found.length} tools`);
+        setMessage(`เชื่อมต่อแล้ว · ${connected.connection.protocol} · พบ ${found.length} tools`);
       })}>เชื่อมและอ่าน tools</button>
-      <button className={button} disabled={busy} onClick={()=>{setTools([]);setResult('');sessionStorage.removeItem('lyrics-studio:remote-mcp-token');setToken('');setMessage('ล้าง token และตัดการเชื่อมต่อแล้ว');}}>ตัดการเชื่อมต่อ</button>
+      <button className={button} disabled={busy} onClick={()=>{setTools([]);setConnection(null);setResult('');sessionStorage.removeItem('lyrics-studio:remote-mcp-token');setToken('');setMessage('ล้าง token และตัดการเชื่อมต่อแล้ว');}}>ตัดการเชื่อมต่อ</button>
     </div>
     {tools.length>0 && <div className="space-y-2 border-t border-[var(--border)] pt-3">
       <label className="block text-xs">เลือก MCP tool<select value={toolName} onChange={e=>setToolName(e.target.value)} className="mt-1 w-full border p-2">{tools.map(tool=><option key={tool.name} value={tool.name}>{tool.name}</option>)}</select></label>
       {tools.find(tool=>tool.name===toolName)?.description && <p className="text-xs text-[var(--muted)]">{tools.find(tool=>tool.name===toolName)?.description}</p>}
       <label className="block text-xs">Arguments (JSON)<textarea value={args} onChange={e=>setArgs(e.target.value)} rows={4} spellCheck={false} className="mt-1 w-full border p-2 font-mono" /></label>
-      <button className={button} disabled={busy||!toolName} onClick={()=>void run(async()=>{const data=await callRemoteMcpTool(endpoint,token,toolName,JSON.parse(args));setResult(JSON.stringify(data,null,2));setMessage(`เรียก ${toolName} สำเร็จ`);})}>เรียก tool</button>
+      <button className={button} disabled={busy||!toolName||!connection} onClick={()=>void run(async()=>{const data=await callRemoteMcpTool(endpoint,token,connection!,toolName,JSON.parse(args));setResult(JSON.stringify(data,null,2));setMessage(`เรียก ${toolName} สำเร็จ`);})}>เรียก tool</button>
       {result && <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words border border-[var(--border)] p-2 text-xs">{result}</pre>}
     </div>}
     <p role="status" className="text-xs">{busy?'กำลังเชื่อมต่อ…':message}</p>
