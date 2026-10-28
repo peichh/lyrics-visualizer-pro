@@ -786,10 +786,6 @@ export default function App() {
         {notice && <div className="border-t border-[var(--border)] px-4 py-1.5"><p className="flex items-center gap-2 text-[11px] text-[var(--muted)]"><Sparkles className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />{notice}</p></div>}
       </header>
 
-      <div className="flex h-10 shrink-0 items-center gap-1 border-b border-[var(--border)] bg-[var(--surface)] px-3 xl:hidden" aria-label="Mobile workspace view">
-        <button onClick={() => setMobileView("stage")} aria-pressed={mobileView === "stage"} className={`flex-1 rounded-md px-3 py-1.5 text-xs font-bold ${mobileView === "stage" ? "bg-[var(--accent)] text-white" : "text-[var(--muted)]"}`}>◫ Preview · เวที</button>
-        <button onClick={() => setMobileView("tools")} aria-pressed={mobileView === "tools"} className={`flex-1 rounded-md px-3 py-1.5 text-xs font-bold ${mobileView === "tools" ? "bg-[var(--accent)] text-white" : "text-[var(--muted)]"}`}>☷ Edit · เครื่องมือ</button>
-      </div>
       <main className="flex min-h-0 flex-1 overflow-hidden max-xl:flex-col">
         {/* LEFT — independent scroll */}
         <aside className="studio-sidebar thin-scroll hidden w-[360px] shrink-0 overflow-y-auto overflow-x-hidden border-r border-[var(--border)] xl:block">
@@ -1243,7 +1239,13 @@ export default function App() {
         </aside>
       </main>
 
-      <footer className="shrink-0 border-t border-[var(--border)] px-4 py-1.5"><p className={`${label} text-center`}>LV Pro Studio V2 — you bring the media, we bring the stage · ไม่ใช้ AI สร้างภาพ ทุกอย่างมาจากไฟล์ของคุณ</p></footer>
+      <nav className="flex h-[62px] shrink-0 items-stretch justify-around overflow-x-auto border-t border-[var(--border)] bg-[rgba(14,14,18,.98)] px-1 pb-[env(safe-area-inset-bottom)] shadow-[0_-8px_24px_rgba(0,0,0,.28)] xl:hidden" aria-label="Mobile editing toolbar">
+        {([ ["stage", "Preview", MonitorPlay], ["media", "Media", Music2], ["text", "Text", Type], ["background", "Backdrop", Layers], ["presets", "Style", Sparkles], ["cloud", "AI / MCP", Check]] as const).map(([key, title, Icon]) => {
+          const selected = key === "stage" ? mobileView === "stage" : mobileView === "tools" && tab === key;
+          return <button key={key} onClick={() => key === "stage" ? setMobileView("stage") : (setMobileView("tools"), setTab(key))} aria-pressed={selected} className={`relative flex min-w-[62px] flex-1 flex-col items-center justify-center gap-1 px-1 text-[10px] font-semibold transition ${selected ? "text-[var(--accent)]" : "text-[var(--muted)] hover:text-white"}`}><Icon className="h-[18px] w-[18px]" /><span className="whitespace-nowrap">{title}</span>{selected && <span className="absolute inset-x-2 top-0 h-0.5 rounded-b bg-[var(--accent)] shadow-[0_0_12px_var(--accent)]" />}</button>;
+        })}
+      </nav>
+      <footer className="hidden shrink-0 border-t border-[var(--border)] px-4 py-1.5 xl:block"><p className={`${label} text-center`}>LV Pro Studio V2 — you bring the media, we bring the stage · ไม่ใช้ AI สร้างภาพ ทุกอย่างมาจากไฟล์ของคุณ</p></footer>
       <audio ref={audioRef} src={audioUrl || undefined} preload="metadata" onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || 0)} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => { if (recording) { exportStopRef.current?.(); } else if (loopPreview) { seek(0); void audioRef.current?.play().catch(() => {}); } else setPlaying(false); }} className="hidden" />
     </div>
     {exportBusy && (
