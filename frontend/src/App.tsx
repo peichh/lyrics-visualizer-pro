@@ -15,6 +15,7 @@ import {
 
 type WordTiming = { text: string; start: number; end: number };
 type Lyric = { id: string; time: number; text: string; wordTimings?: WordTiming[] };
+type Bookend = { enabled: boolean; title: string; body: string; duration: number };
 type BgKind = "image" | "video" | "gif";
 type LoopMode = "normal" | "seamless" | "reverse";
 type BgItem = {
@@ -278,11 +279,13 @@ export default function App() {
   const [recording, setRecording] = useState(false);
   const [converting, setConverting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
-  const [exportReady, setExportReady] = useState<{ url: string; filename: string; format: "MP4" | "WebM" } | null>(null);
+  const [exportReady, setExportReady] = useState<{ url: string; filename: string; format: "MP4" | "WebM"; error?: string } | null>(null);
   const [transcribing, setTranscribing] = useState(false);
   const [includeAudio, setIncludeAudio] = useState(true);
   const [exportQuality, setExportQuality] = useState<"1080p" | "720p">("1080p");
   const [dragOver, setDragOver] = useState(false);
+  const [intro, setIntro] = useState<Bookend>({ enabled: false, title: "ชื่อเพลง", body: "ศิลปิน · Artist", duration: 4 });
+  const [outro, setOutro] = useState<Bookend>({ enabled: false, title: "เครดิต", body: "สร้างด้วย Lyrics Studio", duration: 4 });
 
   const audioRef = useRef<HTMLAudioElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -297,7 +300,13 @@ export default function App() {
   const [, setHistTick] = useState(0);
 
   const hasAudio = !!audioUrl;
-  const totalDur = useMemo(() => { if (duration > 0) return duration; return lyrics.length ? lyrics[lyrics.length - 1].time + 4 : 30; }, [duration, lyrics]);
+  const songDur = useMemo(() => { if (duration > 0) return duration; return lyrics.length ? lyrics[lyrics.length - 1].time + 4 : 30; }, [duration, lyrics]);
+  const introDur = intro.enabled ? Math.max(1, intro.duration) : 0;
+  const outroDur = outro.enabled ? Math.max(1, outro.duration) : 0;
+  const totalDur = introDur + songDur + outroDur;
+  const songTime = Math.max(0, Math.min(songDur, currentTime - introDur));
+  const inIntro = intro.enabled && currentTime < introDur;
+  const inOutro = outro.enabled && currentTime >= introDur + songDur;
   const exportBusy = recording || converting;
   const studioLocked = exportBusy || !!exportReady;
   const exportPercent = recording
@@ -305,11 +314,11 @@ export default function App() {
     : converting
       ? exportProgress >= 100 ? 100 : 50 + Math.min(49, Math.max(0, Math.floor(exportProgress / 2)))
       : Math.min(100, Math.max(0, Math.round(exportProgress)));
-  const activeIdx = useMemo(() => { let idx = -1; lyrics.forEach((l, i) => { if (currentTime >= l.time) idx = i; }); return idx; }, [currentTime, lyrics]);
+  const activeIdx = useMemo(() => { if (inIntro || inOutro) return -1; let idx = -1; lyrics.forEach((l, i) => { if (songTime >= l.time) idx = i; }); return idx; }, [songTime, lyrics, inIntro, inOutro]);
   const activeLyric = activeIdx >= 0 ? lyrics[activeIdx] : null;
   const segStart = activeLyric ? activeLyric.time : 0;
-  const segEnd = activeIdx >= 0 && lyrics[activeIdx + 1] ? lyrics[activeIdx + 1].time : totalDur;
-  const segP = Math.min(1, Math.max(0, (currentTime - segStart) / Math.max(0.1, segEnd - segStart)));
+  const segEnd = activeIdx >= 0 && lyrics[activeIdx + 1] ? lyrics[activeIdx + 1].time : songDur;
+  const segP = Math.min(1, Math.max(0, (songTime - segStart) / Math.max(0.1, segEnd - segStart)));
   const animP = Math.min(1, segP * ts.animSpeed);
 
   const clipStarts = useMemo(() => {
@@ -337,13 +346,13 @@ export default function App() {
 
   const saveProject = useCallback(async (silent = false) => {
     setSaveState("saving");
-    const value = { title: "Lyrics Visualizer Project", ts, aspect, bgFade, seqMode, loopPreview, lyrics: lyrics.map((l) => ({ time: l.time, text: l.text })), updated: new Date().toISOString() };
+    const value = { title: "Lyrics Visualizer Project", ts, aspect, bgFade, seqMode, loopPreview, intro, outro, lyrics: lyrics.map((l) => ({ time: l.time, text: l.text })), updated: new Date().toISOString() };
     try {
       if (projectId) { await api("records.replace", { collection: "studio_projects", id: projectId, value }); }
       else { const rec = await api("records.create", { collection: "studio_projects", value, idempotency_key: `project-${value.updated}` }); if (rec?.id) setProjectId(rec.id); }
       setSaveState("saved"); if (!silent) setNotice("Saved in this browser · บันทึกเนื้อเพลงและการตั้งค่าในเบราว์เซอร์นี้แล้ว (ไฟล์เพลงและพื้นหลังต้องเลือกใหม่)");
     } catch { setSaveState("offline"); if (!silent) setNotice("Cloud save unavailable in this preview — work stays in this session. · บันทึกออนไลน์ไม่พร้อมในพรีวิวนี้"); }
-  }, [ts, aspect, bgFade, seqMode, loopPreview, lyrics, projectId]);
+  }, [ts, aspect, bgFade, seqMode, loopPreview, intro, outro, lyrics, projectId]);
 
   useEffect(() => {
     (async () => {
@@ -356,6 +365,8 @@ export default function App() {
           if (v.aspect) setAspect(v.aspect);
           if (typeof v.bgFade === "number") setBgFade(v.bgFade);
           if (v.seqMode) setSeqMode(v.seqMode);
+          if (v.intro) setIntro((previous) => ({ ...previous, ...v.intro }));
+          if (v.outro) setOutro((previous) => ({ ...previous, ...v.outro }));
           if (Array.isArray(v.lyrics) && v.lyrics.length) { setLyrics(v.lyrics.map((l: { time: number; text: string }) => ({ id: nid("l"), time: l.time, text: l.text }))); setLyricSource("Restored project"); }
           setSaveState("saved");
         }
@@ -368,7 +379,7 @@ export default function App() {
     if (!lyrics.length && projectId === null) return;
     const t = setTimeout(() => { void saveProject(true); }, 1800);
     return () => clearTimeout(t);
-  }, [ts, lyrics, aspect]);
+  }, [ts, lyrics, aspect, intro, outro]);
 
   const saveCustomPreset = async () => {
     const p: Preset = { name: `My Preset ${customPresets.length + 1}`, artist: "Custom · ของฉัน", dot: ts.color, style: { ...ts } };
@@ -444,49 +455,39 @@ export default function App() {
     if (!lines.length) { setNotice("Paste some lyrics first. · วางเนื้อเพลงก่อน"); return; }
     pushHistory(); setLyrics(lines.map((text, i) => ({ id: nid("l"), time: i * 3, text }))); setLyricSource("Pasted lyrics (auto 3s)"); setNotice(`${lines.length} lines auto-timestamped every 3s · ใส่เวลาอัตโนมัติทุก 3 วิ — drag blocks in the timeline to fine-tune`);
   };
-  const spreadEvenly = () => { if (!lyrics.length) return; pushHistory(); const step = totalDur / lyrics.length; setLyrics(lyrics.map((l, i) => ({ ...l, time: Math.round(i * step * 100) / 100 }))); setNotice("Lyrics spread evenly across the track · กระจายเนื้อเพลงเท่ากันทั้งเพลง"); };
+  const spreadEvenly = () => { if (!lyrics.length) return; pushHistory(); const step = songDur / lyrics.length; setLyrics(lyrics.map((l, i) => ({ ...l, time: Math.round(i * step * 100) / 100 }))); setNotice("Lyrics spread evenly across the track · กระจายเนื้อเพลงเท่ากันทั้งเพลง"); };
   const exportLrc = () => {
     const body = lyrics.map((l) => { const m = Math.floor(l.time / 60), s = l.time - m * 60; return `[${String(m).padStart(2, "0")}:${s.toFixed(2).padStart(5, "0")}] ${l.text}`; }).join("\n");
     const url = URL.createObjectURL(new Blob([body], { type: "text/plain" })); const a = document.createElement("a"); a.href = url; a.download = "lyrics-edited.lrc"; a.click(); setTimeout(() => URL.revokeObjectURL(url), 3000); setNotice("LRC file downloaded · ดาวน์โหลดไฟล์เนื้อเพลงแล้ว");
   };
 
-  const togglePlay = useCallback(() => { const a = audioRef.current; if (a && audioUrl) { if (a.paused) void a.play().catch(() => {}); else a.pause(); } else setPlaying((p) => !p); }, [audioUrl]);
+  const togglePlay = useCallback(() => setPlaying((p) => !p), []);
   useEffect(() => {
-    if (!audioUrl && playing) {
-      const iv = setInterval(() => setCurrentTime((t) => { const n = t + 0.1; if (n >= totalDur) { if (loopPreview && !recording) return 0; setPlaying(false); return totalDur; } return n; }), 100);
-      return () => clearInterval(iv);
-    }
-  }, [playing, audioUrl, totalDur, loopPreview, recording]);
-  useEffect(() => { if (recording && !audioUrl && currentTime >= totalDur) exportStopRef.current?.(); }, [recording, audioUrl, currentTime, totalDur]);
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio || !audioUrl) return;
+    if (!playing) return;
     let raf = 0;
-    let lastPaint = 0;
-    const stop = () => { if (raf) cancelAnimationFrame(raf); raf = 0; };
+    let previous = performance.now();
     const tick = (now: number) => {
-      if (audio.paused || audio.ended) { stop(); setCurrentTime(audio.currentTime); return; }
-      // Lyrics and waveform stay smooth at 30 fps without rerendering the full
-      // editor on every display refresh. No animation loop runs while paused.
-      if (now - lastPaint >= 1000 / 30) { lastPaint = now; setCurrentTime(audio.currentTime); }
+      const delta = Math.min(.1, Math.max(0, (now - previous) / 1000)); previous = now;
+      setCurrentTime((time) => {
+        const next = time + delta;
+        if (next < totalDur) return next;
+        if (recording) { queueMicrotask(() => exportStopRef.current?.()); setPlaying(false); return totalDur; }
+        if (loopPreview) return 0;
+        setPlaying(false); return totalDur;
+      });
       raf = requestAnimationFrame(tick);
     };
-    const start = () => { if (!raf) raf = requestAnimationFrame(tick); };
-    const sync = () => setCurrentTime(audio.currentTime);
-    audio.addEventListener("play", start);
-    audio.addEventListener("pause", sync);
-    audio.addEventListener("seeked", sync);
-    audio.addEventListener("ended", sync);
-    if (!audio.paused) start();
-    return () => {
-      stop();
-      audio.removeEventListener("play", start);
-      audio.removeEventListener("pause", sync);
-      audio.removeEventListener("seeked", sync);
-      audio.removeEventListener("ended", sync);
-    };
-  }, [audioUrl]);
-  const seek = (t: number) => { const c = Math.max(0, Math.min(totalDur, t)); setCurrentTime(c); if (audioRef.current) audioRef.current.currentTime = c; };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [playing, totalDur, loopPreview, recording]);
+  useEffect(() => {
+    const audio = audioRef.current; if (!audio || !audioUrl) return;
+    const shouldPlayAudio = playing && currentTime >= introDur && currentTime < introDur + songDur;
+    const target = Math.max(0, Math.min(songDur, currentTime - introDur));
+    if (Math.abs(audio.currentTime - target) > .25) audio.currentTime = target;
+    if (shouldPlayAudio) void audio.play().catch(() => {}); else audio.pause();
+  }, [playing, currentTime, introDur, songDur, audioUrl]);
+  const seek = (t: number) => { const c = Math.max(0, Math.min(totalDur, t)); setCurrentTime(c); if (audioRef.current) audioRef.current.currentTime = Math.max(0, Math.min(songDur, c - introDur)); };
   useEffect(() => {
     const root = appRootRef.current;
     if (!root) return;
@@ -586,9 +587,24 @@ export default function App() {
     };
     if (showPrev && backgrounds[prevBgIdx]) drawBackground(backgrounds[prevBgIdx], 1);
     if (backgrounds[activeBgIdx]) drawBackground(backgrounds[activeBgIdx], showPrev ? 1 - prevOpacity : 1);
-    if (activeLyric) drawLyricFrame(ctx, W, H, { text: activeLyric.text, elapsed: currentTime - segStart, duration: segEnd - segStart, currentTime, wordTimings: activeLyric.wordTimings, style: ts, referenceWidth: ASPECT_BASE[aspect][0] });
+    if (activeLyric) drawLyricFrame(ctx, W, H, { text: activeLyric.text, elapsed: songTime - segStart, duration: segEnd - segStart, currentTime: songTime, wordTimings: activeLyric.wordTimings, style: ts, referenceWidth: ASPECT_BASE[aspect][0] });
+    const drawBookend = (card: Bookend, elapsed: number) => {
+      const phaseIn = Math.min(1, Math.max(0, elapsed / .7));
+      const phaseOut = Math.min(1, Math.max(0, (card.duration - elapsed) / .7));
+      ctx.save(); ctx.globalAlpha = Math.min(phaseIn, phaseOut);
+      ctx.fillStyle = 'rgba(5,5,8,.62)'; ctx.fillRect(0, 0, W, H);
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#ffffff';
+      ctx.shadowColor = 'rgba(0,0,0,.75)'; ctx.shadowBlur = Math.max(12, W * .018);
+      ctx.font = `700 ${Math.max(34, W * .055)}px '${ts.fontFamily}', sans-serif`;
+      ctx.fillText(card.title || ' ', W / 2, H / 2 - Math.max(20, H * .045));
+      ctx.shadowBlur = Math.max(6, W * .009); ctx.globalAlpha *= .82;
+      ctx.font = `500 ${Math.max(17, W * .022)}px '${ts.fontFamily}', sans-serif`;
+      ctx.fillText(card.body || ' ', W / 2, H / 2 + Math.max(28, H * .07)); ctx.restore();
+    };
+    if (inIntro) drawBookend(intro, currentTime);
+    if (inOutro) drawBookend(outro, currentTime - introDur - songDur);
     if (ts.grain) drawGrain(ctx, W, H);
-  }, [backgrounds, activeBgIdx, activeLyric, ts, currentTime, segStart, segEnd, aspect, showPrev, prevBgIdx, prevOpacity]);
+  }, [backgrounds, activeBgIdx, activeLyric, ts, currentTime, songTime, segStart, segEnd, aspect, showPrev, prevBgIdx, prevOpacity, inIntro, inOutro, intro, outro, introDur, songDur]);
   const drawExportFrameRef = useRef(drawExportFrame);
   drawExportFrameRef.current = drawExportFrame;
 
@@ -634,17 +650,23 @@ export default function App() {
         const { fetchFile } = await import('@ffmpeg/util');
         setNotice('กำลังเตรียมภาพและเสียงสำหรับ MP4…');
         const ffmpeg = await getFfmpeg();
+        const encoderLog: string[] = [];
         const onProgress = ({progress}: {progress: number}) => setExportProgress(Math.min(99, Math.max(0, Math.round(progress * 100))));
+        const onLog = ({message}: {message: string}) => { encoderLog.push(message); if (encoderLog.length > 12) encoderLog.shift(); };
         try {
           setNotice('กำลังเตรียมภาพและเสียงสำหรับ MP4…');
           await ffmpeg.writeFile('video.webm', await fetchFile(blob));
           const args = ['-i', 'video.webm'];
-          if (includeAudio && audioUrl) { await ffmpeg.writeFile('audio.input', await fetchFile(audioUrl)); args.push('-i', 'audio.input', '-map', '0:v:0', '-map', '1:a:0', '-c:a', 'aac', '-shortest'); }
+          if (includeAudio && audioUrl) {
+            await ffmpeg.writeFile('audio.input', await fetchFile(audioUrl));
+            args.push('-itsoffset', introDur.toFixed(3), '-i', 'audio.input', '-map', '0:v:0', '-map', '1:a:0', '-af', `apad=pad_dur=${outroDur.toFixed(3)}`, '-c:a', 'aac', '-shortest');
+          }
           args.push('-c:v', 'libx264', '-preset', 'ultrafast', '-r', '30', '-fps_mode', 'cfr', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', 'output.mp4');
           ffmpeg.on('progress', onProgress);
+          ffmpeg.on('log', onLog);
           setNotice('กำลังแปลง MP4 · โปรดเปิดหน้านี้ไว้');
           const result = await ffmpeg.exec(args);
-          if (result !== 0) throw new Error('MP4 conversion failed');
+          if (result !== 0) throw new Error(`MP4 conversion failed (${result}): ${encoderLog.slice(-4).join(' | ')}`);
           const data = await ffmpeg.readFile('output.mp4');
           if (typeof data === 'string') throw new Error('Invalid MP4 output');
           setExportProgress(100);
@@ -654,19 +676,19 @@ export default function App() {
           setNotice('MP4 พร้อมดาวน์โหลด · Your video is ready');
         } finally {
           ffmpeg.off('progress', onProgress);
+          ffmpeg.off('log', onLog);
           await Promise.all(['video.webm', 'audio.input', 'output.mp4'].map(name => ffmpeg.deleteFile(name).catch(() => {})));
         }
       })().catch((error) => {
         console.error('MP4 export failed', error);
         const url = URL.createObjectURL(blob);
-        setExportReady({ url, filename: 'lyrics-visualizer-recovery.webm', format: "WebM" });
+        setExportReady({ url, filename: 'lyrics-visualizer-recovery.webm', format: "WebM", error: error instanceof Error ? error.message : String(error) });
         setNotice('แปลง MP4 ไม่สำเร็จ · มีไฟล์ WebM สำรองให้ดาวน์โหลด');
       }).finally(() => setConverting(false));
     };
     let raf = 0; const draw = () => { drawExportFrameRef.current(ctx, W, H); raf = requestAnimationFrame(draw); };
     recorderRef.current = rec; exportStopRef.current = () => { if (rec.state !== 'inactive') rec.stop(); };
-    rec.start(250); draw(); setRecording(true); seek(0);
-    if (audioRef.current && audioUrl) { audioRef.current.muted = true; void audioRef.current.play().catch(() => {}); } else setPlaying(true);
+    rec.start(250); draw(); setRecording(true); seek(0); setPlaying(true);
     setNotice("กำลังบันทึกวิดีโอแบบเรียลไทม์ เมื่อเพลงจบระบบจะแปลงเป็น MP4 อัตโนมัติ");
   };
 
@@ -695,6 +717,22 @@ export default function App() {
   const Toggle = ({ l, v, on, th = "", icon }: { l: string; v: boolean; on: (b: boolean) => void; th?: string; icon?: React.ReactNode }) => (
     <button title={titleAttr(l, th)} onClick={() => on(!v)} className={`flex items-center gap-1.5 rounded-lg border px-2 py-1.5 text-[11px] font-semibold transition ${v ? "border-[var(--accent)] bg-[var(--accent-soft)] text-white" : "border-[var(--border)] bg-[var(--surface2)] text-[var(--muted)]"}`}>{icon ?? (v ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />)}{l}</button>
   );
+  const BookendControls = () => (
+    <section className={`${card} space-y-3 p-3.5`} aria-label="Intro and outro">
+      <p className={`${label} flex items-center gap-2`}><Film className="h-3.5 w-3.5" /> Intro / Outro · ช่วงเปิดและปิด</p>
+      {([["INTRO", intro, setIntro], ["OUTRO", outro, setOutro]] as const).map(([name, value, update]) => (
+        <div key={name} className="space-y-2 border-t border-[var(--border)] pt-3 first:border-t-0 first:pt-0">
+          <label className="flex items-center justify-between gap-3 text-[11px] font-bold"><span>{name}</span><input type="checkbox" checked={value.enabled} onChange={(e) => update((old) => ({ ...old, enabled: e.target.checked }))} /></label>
+          {value.enabled && <>
+            <input value={value.title} onChange={(e) => update((old) => ({ ...old, title: e.target.value }))} aria-label={`${name} title`} placeholder={name === "INTRO" ? "ชื่อเพลง" : "เครดิต"} className="w-full border border-[var(--border)] bg-[var(--surface2)] px-2.5 py-2 text-xs outline-none focus:border-[var(--accent)]" />
+            <textarea value={value.body} onChange={(e) => update((old) => ({ ...old, body: e.target.value }))} aria-label={`${name} text`} rows={2} placeholder={name === "INTRO" ? "ศิลปิน / คำโปรย" : "เครดิตท้ายเพลง"} className="w-full resize-none border border-[var(--border)] bg-[var(--surface2)] px-2.5 py-2 text-xs outline-none focus:border-[var(--accent)]" />
+            <Slider l={`${name} duration`} th="ระยะเวลา" v={value.duration} min={1} max={15} step={.5} on={(duration) => update((old) => ({ ...old, duration }))} unit="s" />
+          </>}
+        </div>
+      ))}
+      <p className="text-[10px] leading-relaxed text-[var(--muted)]">Intro เฟดเข้าก่อนเพลง · Outro แสดงหลังเพลงและรวมในไฟล์ MP4</p>
+    </section>
+  );
 
   const displayText = ts.uppercase && activeLyric ? activeLyric.text.toUpperCase() : activeLyric?.text || "";
   const lyricTokens = splitLyricTokens(displayText);
@@ -705,7 +743,7 @@ export default function App() {
     const index = visualWordIndex++;
     const timedWord = activeLyric?.wordTimings?.[index];
     const wordP = timedWord
-      ? Math.max(0, Math.min(1, (currentTime - timedWord.start) / Math.max(0.08, timedWord.end - timedWord.start)))
+      ? Math.max(0, Math.min(1, (songTime - timedWord.start) / Math.max(0.08, timedWord.end - timedWord.start)))
       : Math.max(0, Math.min(1, animP * wordCount - index));
     const fill = Math.round(wordP * 100);
     return <span key={key} className="inline-block" style={{ backgroundImage: `linear-gradient(to right, ${ts.glowOn ? ts.glowColor : "#C4B5FD"} ${fill}%, ${ts.color} ${fill}%)`, WebkitBackgroundClip: "text", backgroundClip: "text", WebkitTextFillColor: "transparent", color: "transparent" }}>{token}</span>;
@@ -713,6 +751,7 @@ export default function App() {
 
   const renderLyricText = () => {
     if (!activeLyric) {
+      if (inIntro || inOutro) return null;
       if (lyrics.length > 0) return <span className="anim-fadeup inline-block w-full text-center" style={{ fontFamily: `'${ts.fontFamily}', sans-serif`, fontSize: "clamp(24px, 3.5vw, 44px)", fontWeight: 600, color: "#FFFFFF", opacity: 0.6, textAlign: "center", textShadow: "0 2px 12px rgba(0,0,0,.8)" }}>♪ กด Play เพื่อเริ่ม · Press play</span>;
       return (<span className="block w-full text-center" style={{ fontFamily: `'${ts.fontFamily}', sans-serif`, fontSize: "clamp(30px, 3.6vw, 60px)", fontWeight: 800, lineHeight: 1.25, color: "#FFFFFF", textAlign: "center", textShadow: "0 3px 18px rgba(0,0,0,.85), 0 0 32px rgba(139,92,246,.35)" }}>ลากเพลง + พื้นหลังมาวางที่นี่ • หรือกดโหลด Demo<span className="mt-3 block" style={{ fontSize: "clamp(13px, 1.4vw, 18px)", fontWeight: 600, opacity: 0.75, letterSpacing: 0.2 }}>Drop your song + backgrounds here — lyrics will fill the stage</span></span>);
     }
@@ -853,8 +892,10 @@ export default function App() {
                 <span className={label}>{audioName ? `${fmt(duration)} · loaded` : "MP3 / WAV · click to browse"}</span>
                 <input type="file" accept=".mp3,.wav,audio/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) onAudio(f); }} />
               </label>
-              {hasAudio && <Waveform audioUrl={audioUrl} progress={duration ? currentTime / duration : 0} onSeek={(p) => seek(p * totalDur)} />}
+              {hasAudio && <Waveform audioUrl={audioUrl} progress={duration ? songTime / duration : 0} onSeek={(p) => seek(introDur + p * songDur)} />}
             </section>
+
+            <BookendControls />
 
             <section className={`${card} p-3.5`}>
               <p className={`${label} mb-2.5 flex items-center gap-2`}><FileText className="h-3.5 w-3.5" /> Lyrics · เนื้อเพลง</p>
@@ -880,11 +921,11 @@ export default function App() {
                   {lyrics.map((l) => (
                     <div key={l.id} className={`flex items-center gap-1.5 rounded-lg border px-2 py-1 ${lyrics[activeIdx]?.id === l.id ? "border-[var(--accent)] bg-[var(--accent-soft)]" : "border-transparent hover:bg-[var(--surface2)]"}`}>
                       <input defaultValue={fmtFull(l.time)} key={l.id + l.time} onBlur={(e) => { const t = parseTimeInput(e.target.value, l.time); pushHistory(); setLyrics((prev) => prev.map((x) => x.id === l.id ? { ...x, time: t, wordTimings: x.wordTimings?.map(word => ({ ...word, start: word.start + t - l.time, end: word.end + t - l.time })) } : x).sort((a, b) => a.time - b.time)); }} className="mono w-[62px] shrink-0 rounded bg-black/40 px-1 py-0.5 text-[10px] text-[var(--accent)] outline-none" title={titleAttr("Start time mm:ss.cc — click line to play from here", "เวลาเริ่ม")} />
-                      <input value={l.text} onChange={(e) => setLyrics((prev) => prev.map((x) => x.id === l.id ? { ...x, text: e.target.value, wordTimings: undefined } : x))} onClick={() => seek(l.time)} className="min-w-0 flex-1 bg-transparent text-[11px] outline-none" />
+                      <input value={l.text} onChange={(e) => setLyrics((prev) => prev.map((x) => x.id === l.id ? { ...x, text: e.target.value, wordTimings: undefined } : x))} onClick={() => seek(introDur + l.time)} className="min-w-0 flex-1 bg-transparent text-[11px] outline-none" />
                       <button onClick={() => { pushHistory(); setLyrics((prev) => prev.filter((x) => x.id !== l.id)); }} className="shrink-0 text-zinc-500 hover:text-red-400" title={titleAttr("Delete line", "ลบบรรทัด")}><Trash2 className="h-3 w-3" /></button>
                     </div>
                   ))}
-                  <button onClick={() => { pushHistory(); setLyrics((prev) => [...prev, { id: nid("l"), time: Math.round(currentTime * 100) / 100, text: "New line · ท่อนใหม่" }].sort((a, b) => a.time - b.time)); }} className="flex w-full items-center justify-center gap-1 rounded-lg border border-dashed border-[var(--border)] py-1.5 text-[11px] font-semibold text-[var(--muted)] hover:border-[var(--accent)] hover:text-white"><Plus className="h-3 w-3" /> Add line at playhead · เพิ่มท่อนที่ตำแหน่งเล่น</button>
+                  <button onClick={() => { pushHistory(); setLyrics((prev) => [...prev, { id: nid("l"), time: Math.round(songTime * 100) / 100, text: "New line · ท่อนใหม่" }].sort((a, b) => a.time - b.time)); }} className="flex w-full items-center justify-center gap-1 rounded-lg border border-dashed border-[var(--border)] py-1.5 text-[11px] font-semibold text-[var(--muted)] hover:border-[var(--accent)] hover:text-white"><Plus className="h-3 w-3" /> Add line at playhead · เพิ่มท่อนที่ตำแหน่งเล่น</button>
                 </div>
               )}
             </section>
@@ -1011,26 +1052,28 @@ export default function App() {
             </div>
             <div className="thin-scroll h-[calc(180px-34px)] overflow-x-auto overflow-y-hidden px-3.5 pb-2 pt-1.5 max-xl:h-[calc(132px-24px)] max-xl:px-2 max-xl:pt-1">
               <div style={{ width: `${timelineZoom}%`, minWidth: `${560 * timelineZoom / 100}px` }}>
-                <Waveform audioUrl={audioUrl} progress={duration ? currentTime / totalDur : 0} onSeek={(p) => seek(p * totalDur)} tall />
+                <Waveform audioUrl={audioUrl} progress={duration ? songTime / songDur : 0} onSeek={(p) => seek(introDur + p * songDur)} tall />
                 <div className="relative mt-1.5 h-12 rounded-lg bg-black/40" title={titleAttr("Drag a block left/right to retime it", "ลากบล็อกซ้าย-ขวาเพื่อปรับเวลา")}>
+                  {intro.enabled && <button onClick={() => seek(0)} className="absolute top-1 z-10 flex h-10 items-center overflow-hidden border border-[var(--accent)] bg-[var(--accent-soft)] px-2 text-[9px] font-bold" style={{ left: 0, width: `${introDur / totalDur * 100}%` }}>INTRO · {intro.title}</button>}
                   {lyrics.map((l, i) => {
-                    const next = lyrics[i + 1]; const w = ((next ? next.time : totalDur) - l.time) / totalDur * 100;
+                    const next = lyrics[i + 1]; const w = ((next ? next.time : songDur) - l.time) / totalDur * 100;
                     return (
                       <div key={l.id}
                         onPointerDown={(e) => {
                           const parent = (e.currentTarget.parentElement as HTMLElement).getBoundingClientRect();
                           const startX = e.clientX; const orig = l.time; let moved = false; let latestX = startX; let frame = 0;
-                          const apply = (clientX: number) => { if (Math.abs(clientX - startX) > 3) moved = true; if (moved) { const raw = Math.max(0, Math.min(totalDur - 0.1, orig + ((clientX - startX) / parent.width) * totalDur)); const nextTime = Math.round(raw * 100) / 100; const delta = nextTime - orig; setLyrics((prev) => prev.map((x) => x.id === l.id ? { ...x, time: nextTime, wordTimings: x.wordTimings?.map(word => ({ ...word, start: word.start + delta, end: word.end + delta })) } : x)); } };
+                          const apply = (clientX: number) => { if (Math.abs(clientX - startX) > 3) moved = true; if (moved) { const raw = Math.max(0, Math.min(songDur - 0.1, orig + ((clientX - startX) / parent.width) * totalDur)); const nextTime = Math.round(raw * 100) / 100; const delta = nextTime - orig; setLyrics((prev) => prev.map((x) => x.id === l.id ? { ...x, time: nextTime, wordTimings: x.wordTimings?.map(word => ({ ...word, start: word.start + delta, end: word.end + delta })) } : x)); } };
                           const move = (ev: PointerEvent) => { latestX = ev.clientX; if (!frame) frame = requestAnimationFrame(() => { frame = 0; apply(latestX); }); };
-                          const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); window.removeEventListener("pointercancel", up); if (frame) { cancelAnimationFrame(frame); frame = 0; apply(latestX); } if (moved) { pushHistory(); setLyrics((prev) => [...prev].sort((a, b) => a.time - b.time)); } else seek(l.time); };
+                          const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); window.removeEventListener("pointercancel", up); if (frame) { cancelAnimationFrame(frame); frame = 0; apply(latestX); } if (moved) { pushHistory(); setLyrics((prev) => [...prev].sort((a, b) => a.time - b.time)); } else seek(introDur + l.time); };
                           window.addEventListener("pointermove", move); window.addEventListener("pointerup", up); window.addEventListener("pointercancel", up);
                         }}
                         className={`absolute top-1 flex h-10 cursor-ew-resize items-center overflow-hidden rounded-md border px-1.5 ${i === activeIdx ? "border-[var(--accent)] bg-[var(--accent)] text-white" : "border-[var(--border)] bg-[var(--surface2)] hover:border-[var(--accent)]"}`}
-                        style={{ left: `${(l.time / totalDur) * 100}%`, width: `max(26px, ${w}%)` }}>
+                        style={{ left: `${((introDur + l.time) / totalDur) * 100}%`, width: `max(26px, ${w}%)` }}>
                         <span className="truncate text-[9px] font-semibold leading-tight">{l.text}</span>
                       </div>
                     );
                   })}
+                  {outro.enabled && <button onClick={() => seek(introDur + songDur)} className="absolute right-0 top-1 z-10 flex h-10 items-center overflow-hidden border border-[var(--accent)] bg-[var(--accent-soft)] px-2 text-[9px] font-bold" style={{ width: `${outroDur / totalDur * 100}%` }}>OUTRO · {outro.title}</button>}
                   <div onPointerDown={(e) => { e.stopPropagation(); const track = e.currentTarget.parentElement as HTMLElement; track.setPointerCapture(e.pointerId); let latestX = e.clientX; let frame = 0; const apply = (clientX: number) => { const r = track.getBoundingClientRect(); seek(Math.max(0, Math.min(totalDur, ((clientX - r.left) / r.width) * totalDur))); }; const scrub = (ev: PointerEvent) => { latestX = ev.clientX; if (!frame) frame = requestAnimationFrame(() => { frame = 0; apply(latestX); }); }; const end = () => { window.removeEventListener("pointermove", scrub); window.removeEventListener("pointerup", end); window.removeEventListener("pointercancel", end); if (frame) { cancelAnimationFrame(frame); frame = 0; apply(latestX); } }; apply(latestX); window.addEventListener("pointermove", scrub); window.addEventListener("pointerup", end); window.addEventListener("pointercancel", end); }} className="absolute top-0 z-20 h-full w-3 -translate-x-1/2 cursor-ew-resize touch-none" style={{ left: `${(currentTime / totalDur) * 100}%` }} aria-label="Drag playhead"><div className="pointer-events-none mx-auto h-full w-px bg-[var(--accent2)]" /></div>
                 </div>
                 {backgrounds.length > 0 && (
@@ -1076,6 +1119,7 @@ export default function App() {
                   <input type="file" accept=".mp3,.wav,audio/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) onAudio(f); }} />
                 </label>
               </section>
+              <div className="xl:hidden"><BookendControls /></div>
               <section className={`${card} p-3.5`}>
                 <p className={`${label} mb-2.5 flex items-center gap-2`}><FileText className="h-3.5 w-3.5" /> Lyrics · เนื้อเพลง</p>
                 <label className="block cursor-pointer rounded-xl border border-dashed border-[var(--border)] bg-[var(--surface2)] p-3 text-center transition hover:border-[var(--accent)]" title={titleAttr("Upload .lrc / .txt / .srt", "อัพโหลดไฟล์เนื้อเพลง")}>
@@ -1098,10 +1142,10 @@ export default function App() {
                 {lyrics.length > 0 && <div className="thin-scroll mt-3 max-h-52 space-y-1 overflow-y-auto pr-1">
                   {lyrics.map((l) => <div key={l.id} className={`flex items-center gap-1.5 rounded-lg border px-2 py-1 ${lyrics[activeIdx]?.id === l.id ? "border-[var(--accent)] bg-[var(--accent-soft)]" : "border-transparent hover:bg-[var(--surface2)]"}`}>
                     <input defaultValue={fmtFull(l.time)} key={l.id + l.time} onBlur={(e) => { const t = parseTimeInput(e.target.value, l.time); pushHistory(); setLyrics((prev) => prev.map((x) => x.id === l.id ? { ...x, time: t, wordTimings: x.wordTimings?.map(word => ({ ...word, start: word.start + t - l.time, end: word.end + t - l.time })) } : x).sort((a, b) => a.time - b.time)); }} className="mono w-[66px] shrink-0 rounded bg-black/40 px-1 py-1 text-[10px] text-[var(--accent)] outline-none" aria-label={`Start time ${l.text}`} />
-                    <input value={l.text} onChange={(e) => setLyrics((prev) => prev.map((x) => x.id === l.id ? { ...x, text: e.target.value, wordTimings: undefined } : x))} onClick={() => seek(l.time)} className="min-w-0 flex-1 bg-transparent py-1 text-xs outline-none" aria-label={`Lyric ${l.text}`} />
+                    <input value={l.text} onChange={(e) => setLyrics((prev) => prev.map((x) => x.id === l.id ? { ...x, text: e.target.value, wordTimings: undefined } : x))} onClick={() => seek(introDur + l.time)} className="min-w-0 flex-1 bg-transparent py-1 text-xs outline-none" aria-label={`Lyric ${l.text}`} />
                     <button onClick={() => { pushHistory(); setLyrics((prev) => prev.filter((x) => x.id !== l.id)); }} className="shrink-0 px-1 text-zinc-500 hover:text-red-400" title={titleAttr("Delete line", "ลบบรรทัด")}><Trash2 className="h-3 w-3" /></button>
                   </div>)}
-                  <button onClick={() => { pushHistory(); setLyrics((prev) => [...prev, { id: nid("l"), time: Math.round(currentTime * 100) / 100, text: "New line · ท่อนใหม่" }].sort((a, b) => a.time - b.time)); }} className="flex w-full items-center justify-center gap-1 rounded-lg border border-dashed border-[var(--border)] py-1.5 text-[11px] font-semibold text-[var(--muted)] hover:border-[var(--accent)] hover:text-white"><Plus className="h-3 w-3" /> Add line at playhead · เพิ่มท่อน</button>
+                  <button onClick={() => { pushHistory(); setLyrics((prev) => [...prev, { id: nid("l"), time: Math.round(songTime * 100) / 100, text: "New line · ท่อนใหม่" }].sort((a, b) => a.time - b.time)); }} className="flex w-full items-center justify-center gap-1 rounded-lg border border-dashed border-[var(--border)] py-1.5 text-[11px] font-semibold text-[var(--muted)] hover:border-[var(--accent)] hover:text-white"><Plus className="h-3 w-3" /> Add line at playhead · เพิ่มท่อน</button>
                 </div>}
               </section>
               <section className={`${card} p-3.5`}>
@@ -1318,7 +1362,7 @@ export default function App() {
         })}
       </nav>
       <footer className="hidden shrink-0 border-t border-[var(--border)] px-4 py-1.5 xl:block"><p className={`${label} text-center`}>LV Pro Studio V2 — you bring the media, we bring the stage · ไม่ใช้ AI สร้างภาพ ทุกอย่างมาจากไฟล์ของคุณ</p></footer>
-      <audio ref={audioRef} src={audioUrl || undefined} preload="metadata" onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || 0)} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => { if (recording) { exportStopRef.current?.(); } else if (loopPreview) { seek(0); void audioRef.current?.play().catch(() => {}); } else setPlaying(false); }} className="hidden" />
+      <audio ref={audioRef} src={audioUrl || undefined} preload="metadata" onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || 0)} className="hidden" />
     </div>
     {exportBusy && (
       <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/65 p-4 backdrop-blur-[3px]" role="alertdialog" aria-modal="true" aria-labelledby="export-progress-title" aria-describedby="export-progress-help">
@@ -1341,7 +1385,7 @@ export default function App() {
       <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="export-ready-title">
         <section className="w-full max-w-md rounded-2xl border border-white/15 bg-zinc-950/95 p-6 text-white shadow-2xl">
           <div className="mb-4 flex items-center gap-3"><div className="flex h-10 w-10 items-center justify-center rounded-full bg-lime-300/15 text-lime-300"><Check className="h-5 w-5" /></div><div><h2 id="export-ready-title" className="text-lg font-semibold">{exportReady.format} พร้อมดาวน์โหลด</h2><p className="text-xs text-zinc-400">วิดีโอเรนเดอร์เสร็จแล้ว · Your video is ready</p></div></div>
-          <div className="mb-5 rounded-xl border border-white/10 bg-white/5 p-3"><p className="break-all text-xs font-medium text-zinc-200">{exportReady.filename}</p><p className="mt-1 text-[11px] text-zinc-400">{exportReady.format === "MP4" ? `${exportQuality} · ${aspect} · ${fmt(totalDur)}` : "วิดีโอสำรอง · ไม่มีเสียง"}</p></div>
+          <div className="mb-5 rounded-xl border border-white/10 bg-white/5 p-3"><p className="break-all text-xs font-medium text-zinc-200">{exportReady.filename}</p><p className="mt-1 text-[11px] text-zinc-400">{exportReady.format === "MP4" ? `${exportQuality} · ${aspect} · ${fmt(totalDur)}` : "วิดีโอสำรอง · ไม่มีเสียง"}</p>{exportReady.error && <p className="mt-2 break-words text-[10px] text-amber-300">MP4 error: {exportReady.error}</p>}</div>
           <div className="flex gap-2">
             <a href={exportReady.url} download={exportReady.filename} className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-[var(--accent)] px-4 py-3 text-sm font-bold text-white shadow-[0_0_18px_rgba(139,92,246,.35)]"><Download className="h-4 w-4" /> ดาวน์โหลด {exportReady.format}</a>
             <button onClick={() => { URL.revokeObjectURL(exportReady.url); setExportReady(null); }} className="rounded-xl border border-white/20 px-4 py-3 text-sm font-semibold text-zinc-200 hover:bg-white/10">ปิด</button>
