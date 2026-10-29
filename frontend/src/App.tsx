@@ -1092,8 +1092,8 @@ export default function App() {
               </div>
             </div>
             <div className="thin-scroll h-[calc(220px-34px)] overflow-x-auto overflow-y-hidden px-3.5 pb-2 pt-1.5 max-xl:h-[calc(132px-24px)] max-xl:px-2 max-xl:pt-1">
-              <div style={{ width: `${timelineZoom}%`, minWidth: `${560 * timelineZoom / 100}px` }}>
-                <Waveform audioUrl={audioUrl} progress={duration ? songTime / songDur : 0} onSeek={(p) => seek(introDur + p * songDur)} tall />
+              <div className="relative" style={{ width: `${timelineZoom}%`, minWidth: `${560 * timelineZoom / 100}px` }}>
+                <Waveform audioUrl={audioUrl} progress={duration ? songTime / songDur : 0} onSeek={(p) => seek(introDur + p * songDur)} tall zoom={timelineZoom} lead={introDur / totalDur} tail={outroDur / totalDur} />
                 <div className="relative mt-1.5 h-12 rounded-lg bg-black/40" title={titleAttr("Drag a block left/right to retime it", "ลากบล็อกซ้าย-ขวาเพื่อปรับเวลา")}>
                   {intro.enabled && <button onClick={() => seek(0)} className="absolute top-1 z-10 flex h-10 items-center overflow-hidden border border-[var(--accent)] bg-[var(--accent-soft)] px-2 text-[9px] font-bold" style={{ left: 0, width: `${introDur / totalDur * 100}%` }}>INTRO · {intro.title}</button>}
                   {lyrics.map((l, i) => {
@@ -1115,7 +1115,6 @@ export default function App() {
                     );
                   })}
                   {outro.enabled && <button onClick={() => seek(introDur + songDur)} className="absolute right-0 top-1 z-10 flex h-10 items-center overflow-hidden border border-[var(--accent)] bg-[var(--accent-soft)] px-2 text-[9px] font-bold" style={{ width: `${outroDur / totalDur * 100}%` }}>OUTRO · {outro.title}</button>}
-                  <div onPointerDown={(e) => { e.stopPropagation(); const track = e.currentTarget.parentElement as HTMLElement; track.setPointerCapture(e.pointerId); let latestX = e.clientX; let frame = 0; const apply = (clientX: number) => { const r = track.getBoundingClientRect(); seek(Math.max(0, Math.min(totalDur, ((clientX - r.left) / r.width) * totalDur))); }; const scrub = (ev: PointerEvent) => { latestX = ev.clientX; if (!frame) frame = requestAnimationFrame(() => { frame = 0; apply(latestX); }); }; const end = () => { window.removeEventListener("pointermove", scrub); window.removeEventListener("pointerup", end); window.removeEventListener("pointercancel", end); if (frame) { cancelAnimationFrame(frame); frame = 0; apply(latestX); } }; apply(latestX); window.addEventListener("pointermove", scrub); window.addEventListener("pointerup", end); window.addEventListener("pointercancel", end); }} className="absolute top-0 z-20 h-full w-3 -translate-x-1/2 cursor-ew-resize touch-none" style={{ left: `${(currentTime / totalDur) * 100}%` }} aria-label="Drag playhead"><div className="pointer-events-none mx-auto h-full w-px bg-[var(--accent2)]" /></div>
                 </div>
                 {backgrounds.length > 0 && (
                   <div className="relative mt-1.5 h-8 rounded-lg bg-black/30">
@@ -1126,6 +1125,7 @@ export default function App() {
                     })}
                   </div>
                 )}
+                <div onPointerDown={(e) => { e.stopPropagation(); const track = e.currentTarget.parentElement as HTMLElement; track.setPointerCapture(e.pointerId); let latestX = e.clientX; let frame = 0; const apply = (clientX: number) => { const r = track.getBoundingClientRect(); seek(Math.max(0, Math.min(totalDur, ((clientX - r.left) / r.width) * totalDur))); }; const scrub = (ev: PointerEvent) => { latestX = ev.clientX; if (!frame) frame = requestAnimationFrame(() => { frame = 0; apply(latestX); }); }; const end = () => { window.removeEventListener("pointermove", scrub); window.removeEventListener("pointerup", end); window.removeEventListener("pointercancel", end); if (frame) { cancelAnimationFrame(frame); frame = 0; apply(latestX); } }; apply(latestX); window.addEventListener("pointermove", scrub); window.addEventListener("pointerup", end); window.addEventListener("pointercancel", end); }} className="timeline-playhead absolute top-2 z-[60] h-[108px] w-5 -translate-x-1/2 cursor-ew-resize touch-none" style={{ left: `${(currentTime / totalDur) * 100}%` }} aria-label="Drag playhead"><span className="pointer-events-none absolute left-1/2 top-0 h-full w-[2px] -translate-x-1/2 bg-[#ff4d21] shadow-[0_0_0_1px_rgba(255,255,255,.3)]" /><span className="pointer-events-none absolute left-1/2 top-0 h-0 w-0 -translate-x-1/2 border-x-[6px] border-t-[8px] border-x-transparent border-t-[#ff4d21]" /></div>
                 <p className={`${label} mt-1.5`}>Click block = play from there · Drag = retime · แตะบล็อกเพื่อเล่น ลากเพื่อเลื่อนเวลา</p>
               </div>
             </div>
@@ -1458,29 +1458,56 @@ function Hearts() {
   );
 }
 
-function Waveform({ audioUrl, progress, onSeek, tall = false }: { audioUrl: string | null; progress: number; onSeek: (p: number) => void; tall?: boolean }) {
+function Waveform({ audioUrl, progress, onSeek, tall = false, zoom = 100, lead = 0, tail = 0 }: { audioUrl: string | null; progress: number; onSeek: (p: number) => void; tall?: boolean; zoom?: number; lead?: number; tail?: number }) {
   const ref = useRef<HTMLCanvasElement>(null);
+  const samplesRef = useRef<Float32Array | null>(null);
   const peaksRef = useRef<number[]>([]);
+  const [audioVersion, setAudioVersion] = useState(0);
+  const [waveVersion, setWaveVersion] = useState(0);
   useEffect(() => {
-    peaksRef.current = Array.from({ length: 100 }, (_, i) => 0.25 + Math.abs(Math.sin(i * 1.7)) * 0.6 + ((i * 37) % 13) / 40);
-    if (!audioUrl) return;
+    samplesRef.current = null;
+    peaksRef.current = [];
+    if (!audioUrl) { setAudioVersion((version) => version + 1); return; }
     let cancelled = false;
     (async () => {
       try {
         const buf = await (await fetch(audioUrl)).arrayBuffer();
         const AC = new AudioContext(); const decoded = await AC.decodeAudioData(buf);
-        if (cancelled) return;
-        const ch = decoded.getChannelData(0); const peaks: number[] = []; const block = Math.floor(ch.length / 100) || 1;
-        for (let i = 0; i < 100; i++) { let max = 0; for (let j = 0; j < block; j += Math.ceil(block / 60)) max = Math.max(max, Math.abs(ch[i * block + j] || 0)); peaks.push(Math.max(0.06, max)); }
-        peaksRef.current = peaks; void AC.close();
-      } catch { /* keep synthetic peaks */ }
+        if (!cancelled) { samplesRef.current = new Float32Array(decoded.getChannelData(0)); setAudioVersion((version) => version + 1); }
+        void AC.close();
+      } catch { samplesRef.current = null; setAudioVersion((version) => version + 1); }
     })();
     return () => { cancelled = true; };
   }, [audioUrl]);
   useEffect(() => {
+    const channel = samplesRef.current;
+    if (!channel) { peaksRef.current = []; setWaveVersion((version) => version + 1); return; }
+    const count = Math.max(180, Math.min(1800, Math.round(240 * zoom / 100)));
+    const block = Math.max(1, Math.floor(channel.length / count));
+    const peaks: number[] = [];
+    for (let index = 0; index < count; index++) {
+      let peak = 0; let sum = 0; let samples = 0;
+      const start = index * block; const stride = Math.max(1, Math.floor(block / 160));
+      for (let offset = 0; offset < block; offset += stride) { const value = Math.abs(channel[start + offset] || 0); peak = Math.max(peak, value); sum += value * value; samples++; }
+      const rms = Math.sqrt(sum / Math.max(1, samples)); peaks.push(Math.min(1, peak * .72 + rms * .9));
+    }
+    peaksRef.current = peaks; setWaveVersion((version) => version + 1);
+  }, [audioVersion, zoom]);
+  useEffect(() => {
     const c = ref.current; if (!c) return; const ctx = c.getContext("2d"); if (!ctx) return;
     const W = c.width, H = c.height; ctx.clearRect(0, 0, W, H);
-    peaksRef.current.forEach((p, i) => { const h = Math.max(3, p * (H - 6)); ctx.fillStyle = (i / 100) <= progress ? "#8B5CF6" : "#3A3A46"; ctx.fillRect(i * (W / 100) + 1, (H - h) / 2, 2.6, h); });
-  }, [progress, audioUrl]);
-  return (<canvas ref={ref} width={560} height={tall ? 64 : 44} className={`mt-2 w-full cursor-pointer rounded-lg bg-black/40 ${tall ? "h-12" : "h-10"}`} onClick={(e) => { const r = (e.target as HTMLCanvasElement).getBoundingClientRect(); onSeek(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width))); }} title="Waveform — click to seek · คลิกเพื่อเลื่อนเวลา" />);
+    ctx.fillStyle = tall ? "#e8e6e1" : "#eceae5"; ctx.fillRect(0, 0, W, H);
+    const peaks = peaksRef.current;
+    if (!peaks.length) { ctx.fillStyle = "#a7a39b"; ctx.fillRect(0, H / 2 - .5, W, 1); }
+    else peaks.forEach((peak, index) => {
+      const usableWidth = W * Math.max(.01, 1 - lead - tail);
+      const x0 = W * lead + index * usableWidth / peaks.length; const x1 = W * lead + (index + 1) * usableWidth / peaks.length;
+      const height = Math.max(2, peak * (H - 8));
+      ctx.fillStyle = index / peaks.length <= progress ? "#9b65ff" : "#35343d";
+      ctx.fillRect(x0, (H - height) / 2, Math.max(1, x1 - x0 - .65), height);
+    });
+    ctx.fillStyle = "rgba(255,255,255,.45)"; ctx.fillRect(0, H / 2, W, 1);
+  }, [progress, audioUrl, waveVersion, tall, zoom, lead, tail]);
+  const canvasWidth = Math.max(560, Math.round(560 * zoom / 100));
+  return (<canvas ref={ref} width={canvasWidth} height={tall ? 72 : 48} className={`mt-2 w-full cursor-pointer border-y border-[#b8b4ac] bg-[#e8e6e1] ${tall ? "h-14" : "h-10"}`} onClick={(e) => { const r = (e.target as HTMLCanvasElement).getBoundingClientRect(); const raw = (e.clientX - r.left) / r.width; onSeek(Math.max(0, Math.min(1, (raw - lead) / Math.max(.01, 1 - lead - tail)))); }} title="Waveform — click to seek · คลิกเพื่อเลื่อนเวลา" />);
 }
