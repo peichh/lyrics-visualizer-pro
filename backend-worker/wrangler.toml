@@ -1,11 +1,24 @@
-name = "lyrics-visualizer-pro-api"
+name = "lyrics-studio-multitenant-preview"
 main = "src/index.ts"
-compatibility_date = "2024-01-01"
+compatibility_date = "2026-10-28"
+
+[ai]
+binding = "AI"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "lyrics-visualizer-db"
-database_id = "REPLACE_WITH_YOUR_D1_ID"
+database_name = "lyrics-studio-preview-db"
+database_id = "32292b4f-8830-4776-ba9a-1bdd0eee262c"
 
 [vars]
-FRONTEND_URL = "https://your-pages-domain.pages.dev"
+FRONTEND_URL = "https://codex-mvp-studio.lyrics-visualizer-pro.pages.dev"
+
+[[ratelimits]]
+name = "ACCOUNT_LIMITER"
+namespace_id = "81102001"
+simple = { limit = 5, period = 60 }
+
+[[ratelimits]]
+name = "WHISPER_LIMITER"
+namespace_id = "81102002"
+simple = { limit = 10, period = 60 }

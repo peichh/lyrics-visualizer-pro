@@ -1,0 +1,47 @@
+export type CloudProject = { id: string; title: string; revision: number; lyrics: Array<{id:string;text:string;time:number;endTime?:number}>; [key:string]:unknown };
+export type AIProposal = {id:string;project_id:string;summary:string;status:'pending'|'approved'|'rejected';base_revision:number;changes:Array<Record<string,unknown>>};
+export type AccountCredentials = {id:string;apiKey:string;message:string};
+
+export class StudioApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) { super(message); this.status = status; }
+}
+
+/** Token stays in the caller's memory; it is never included in URLs or logs. */
+export class StudioApi {
+  private origin: string;
+  private token: string | undefined;
+  private request: typeof fetch;
+  constructor(origin: string, token: string | undefined, request: typeof fetch = fetch.bind(globalThis)) {
+    const url = new URL(origin);
+    if (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost','127.0.0.1'].includes(url.hostname))) throw new Error('Cloud API requires HTTPS');
+    if (url.username || url.password || url.search || url.hash) throw new Error('Invalid API URL');
+    this.origin = url.origin;
+    this.token = token;
+    this.request = request;
+  }
+  private async json<T>(path: string, method = 'GET', value?: unknown): Promise<T> {
+    const response = await this.request(this.origin + path, {
+      method, credentials:'omit', redirect:'error', signal:AbortSignal.timeout(30000),
+      headers:{...(this.token ? {Authorization:`Bearer ${this.token}`} : {}), ...(value === undefined ? {} : {'Content-Type':'application/json'})},
+      body:value === undefined ? undefined : JSON.stringify(value),
+    });
+    const body = await response.json().catch(() => null);
+    if (!response.ok) throw new StudioApiError(body?.error || `Cloud request failed (${response.status})`, response.status);
+    if (!body || typeof body !== 'object') throw new StudioApiError('Invalid cloud response',502);
+    return body as T;
+  }
+  static async createAccount(origin:string):Promise<AccountCredentials>{
+    const url=new URL(origin);
+    if(url.protocol!=='https:'&&!(url.protocol==='http:'&&['localhost','127.0.0.1'].includes(url.hostname)))throw new Error('Account creation requires HTTPS');
+    const response=await fetch(url.origin+'/api/account',{method:'POST',credentials:'omit',redirect:'error',signal:AbortSignal.timeout(30000),headers:{'Content-Type':'application/json'},body:'{}'});
+    const body=await response.json().catch(()=>null);if(!response.ok)throw new StudioApiError(body?.error||`Account creation failed (${response.status})`,response.status);if(!body?.apiKey)throw new StudioApiError('The account service returned an invalid response',502);return body as AccountCredentials;
+  }
+  listProjects() { return this.json<CloudProject[]>('/api/projects'); }
+  accountInfo() { return this.json<{isOwner:boolean}>('/api/account/me'); }
+  createProject(project: Omit<CloudProject,'id'>) { return this.json<CloudProject>('/api/projects','POST',project); }
+  saveProject(project: CloudProject) { return this.json<CloudProject>(`/api/projects/${encodeURIComponent(project.id)}`,'PUT',project); }
+  listProposals(projectId: string) { return this.json<{proposals:AIProposal[]}>(`/api/proposals?projectId=${encodeURIComponent(projectId)}`); }
+  approveProposal(id: string) { return this.json<{project:CloudProject;status:'approved'}>(`/api/proposals/${encodeURIComponent(id)}/approve`,'POST'); }
+  rejectProposal(id: string) { return this.json<{status:'rejected'}>(`/api/proposals/${encodeURIComponent(id)}/reject`,'POST'); }
+}
