@@ -17,6 +17,8 @@ type WordTiming = { text: string; start: number; end: number };
 type Lyric = { id: string; time: number; text: string; wordTimings?: WordTiming[] };
 type Bookend = { enabled: boolean; title: string; body: string; duration: number };
 type BgKind = "image" | "video" | "gif";
+type SceneId = "sunset" | "aurora" | "ocean" | "spotlight" | "mesh" | "midnight";
+type ScenePreset = { id: SceneId; name: string; thai: string; colors: [string, string, string] };
 type LoopMode = "normal" | "seamless" | "reverse";
 type BgItem = {
   id: string; url: string; kind: BgKind; name: string;
@@ -144,6 +146,15 @@ type Aspect = (typeof ASPECTS)[number];
 const ASPECT_WH: Record<Aspect, [number, number]> = { "16:9": [1920, 1080], "9:16": [1080, 1920], "1:1": [1080, 1080], "4:5": [1080, 1350] };
 const ASPECT_BASE: Record<Aspect, [number, number]> = { "16:9": [1280, 720], "9:16": [720, 1280], "1:1": [960, 960], "4:5": [960, 1200] };
 
+const SCENE_PRESETS: ScenePreset[] = [
+  { id: "sunset", name: "Soft Sunset", thai: "อาทิตย์ละมุน", colors: ["#ef5a24", "#f5b6a1", "#44403f"] },
+  { id: "aurora", name: "Aurora", thai: "แสงเหนือ", colors: ["#071b2c", "#17b897", "#8b5cf6"] },
+  { id: "ocean", name: "Blue Hour", thai: "บลูอาวร์", colors: ["#071b38", "#2563eb", "#67e8f9"] },
+  { id: "spotlight", name: "Studio Light", thai: "สปอตไลต์", colors: ["#080808", "#46403b", "#d6c8ac"] },
+  { id: "mesh", name: "Dream Mesh", thai: "พาสเทลดรีม", colors: ["#24183f", "#ec4899", "#f59e0b"] },
+  { id: "midnight", name: "Midnight", thai: "เที่ยงคืน", colors: ["#030712", "#172554", "#6366f1"] },
+];
+
 const DEMO_LRC = `[00:00.00] neon lights in the rain
 [00:03.00] your shadow on the glass
 [00:06.00] every city holds a name
@@ -166,6 +177,36 @@ function fmt(t: number) { if (!isFinite(t) || t < 0) t = 0; const m = Math.floor
 function fmtFull(t: number) { const cs = Math.floor((t % 1) * 100); return `${fmt(t)}.${String(cs).padStart(2, "0")}`; }
 function parseTimeInput(v: string, fallback: number) { const p = v.split(":").map((x) => parseFloat(x)); if (p.some(isNaN)) return fallback; if (p.length === 2) return p[0] * 60 + p[1]; if (p.length === 3) return p[0] * 3600 + p[1] * 60 + p[2]; return p[0] || fallback; }
 function hexA(hex: string, a: number) { const h = hex.replace("#", ""); const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16); return `rgba(${r},${g},${b},${a})`; }
+
+function drawScenePreset(ctx: CanvasRenderingContext2D, W: number, H: number, scene: ScenePreset, time: number) {
+  const drift = Math.sin(time * .22) * .08;
+  const linear = ctx.createLinearGradient(0, 0, W, H);
+  linear.addColorStop(0, scene.colors[0]); linear.addColorStop(.52, scene.colors[1]); linear.addColorStop(1, scene.colors[2]);
+  ctx.fillStyle = linear; ctx.fillRect(0, 0, W, H);
+  const blobs = scene.id === "spotlight" ? 2 : 4;
+  for (let index = 0; index < blobs; index++) {
+    const phase = time * (.08 + index * .018) + index * 1.7;
+    const x = W * (.2 + index * .22 + Math.sin(phase) * .12 + drift);
+    const y = H * (.28 + Math.cos(phase * .86) * .2 + (index % 2) * .24);
+    const radius = Math.max(W, H) * (.28 + index * .025);
+    const glow = ctx.createRadialGradient(x, y, 0, x, y, radius);
+    glow.addColorStop(0, hexA(scene.colors[(index + 1) % 3], scene.id === "spotlight" ? .38 : .58));
+    glow.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = glow; ctx.fillRect(0, 0, W, H);
+  }
+  if (scene.id === "ocean") {
+    ctx.save(); ctx.globalAlpha = .16; ctx.strokeStyle = "#ffffff"; ctx.lineWidth = Math.max(1, W / 900);
+    for (let row = 0; row < 7; row++) { ctx.beginPath(); for (let x = 0; x <= W; x += W / 32) { const y = H * (.48 + row * .065) + Math.sin(x / W * 10 + time * .8 + row) * H * .014; x ? ctx.lineTo(x, y) : ctx.moveTo(x, y); } ctx.stroke(); }
+    ctx.restore();
+  }
+  if (scene.id === "midnight") {
+    ctx.save(); ctx.fillStyle = "rgba(255,255,255,.65)";
+    for (let i = 0; i < 42; i++) { const x = (i * 97 % 997) / 997 * W; const y = (i * 53 % 431) / 431 * H; const r = .7 + ((i * 7) % 8) / 5; ctx.globalAlpha = .25 + .35 * Math.sin(time * .7 + i) ** 2; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); }
+    ctx.restore();
+  }
+  const vignette = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * .18, W / 2, H / 2, Math.max(W, H) * .72);
+  vignette.addColorStop(0, "rgba(0,0,0,0)"); vignette.addColorStop(1, "rgba(0,0,0,.36)"); ctx.fillStyle = vignette; ctx.fillRect(0, 0, W, H);
+}
 
 async function api(action: string, args: Record<string, unknown>) {
   const key = `lv-studio:${String(args.collection)}`;
@@ -255,6 +296,7 @@ export default function App() {
   const [pasteText, setPasteText] = useState("");
   const [backgrounds, setBackgrounds] = useState<BgItem[]>([]);
   const [selectedBg, setSelectedBg] = useState<string | null>(null);
+  const [scenePreset, setScenePreset] = useState<SceneId>("sunset");
   const [ts, setTs] = useState<TextStyle>(DEFAULT_STYLE);
   const [aspect, setAspect] = useState<Aspect>("16:9");
   const [tab, setTab] = useState<"media" | "text" | "background" | "presets" | "cloud">("text");
@@ -346,13 +388,13 @@ export default function App() {
 
   const saveProject = useCallback(async (silent = false) => {
     setSaveState("saving");
-    const value = { title: "Lyrics Visualizer Project", ts, aspect, bgFade, seqMode, loopPreview, intro, outro, lyrics: lyrics.map((l) => ({ time: l.time, text: l.text })), updated: new Date().toISOString() };
+    const value = { title: "Lyrics Visualizer Project", ts, aspect, bgFade, seqMode, loopPreview, scenePreset, intro, outro, lyrics: lyrics.map((l) => ({ time: l.time, text: l.text })), updated: new Date().toISOString() };
     try {
       if (projectId) { await api("records.replace", { collection: "studio_projects", id: projectId, value }); }
       else { const rec = await api("records.create", { collection: "studio_projects", value, idempotency_key: `project-${value.updated}` }); if (rec?.id) setProjectId(rec.id); }
       setSaveState("saved"); if (!silent) setNotice("Saved in this browser · บันทึกเนื้อเพลงและการตั้งค่าในเบราว์เซอร์นี้แล้ว (ไฟล์เพลงและพื้นหลังต้องเลือกใหม่)");
     } catch { setSaveState("offline"); if (!silent) setNotice("Cloud save unavailable in this preview — work stays in this session. · บันทึกออนไลน์ไม่พร้อมในพรีวิวนี้"); }
-  }, [ts, aspect, bgFade, seqMode, loopPreview, intro, outro, lyrics, projectId]);
+  }, [ts, aspect, bgFade, seqMode, loopPreview, scenePreset, intro, outro, lyrics, projectId]);
 
   useEffect(() => {
     (async () => {
@@ -365,6 +407,7 @@ export default function App() {
           if (v.aspect) setAspect(v.aspect);
           if (typeof v.bgFade === "number") setBgFade(v.bgFade);
           if (v.seqMode) setSeqMode(v.seqMode);
+          if (SCENE_PRESETS.some((scene) => scene.id === v.scenePreset)) setScenePreset(v.scenePreset);
           if (v.intro) setIntro((previous) => ({ ...previous, ...v.intro }));
           if (v.outro) setOutro((previous) => ({ ...previous, ...v.outro }));
           if (Array.isArray(v.lyrics) && v.lyrics.length) { setLyrics(v.lyrics.map((l: { time: number; text: string }) => ({ id: nid("l"), time: l.time, text: l.text }))); setLyricSource("Restored project"); }
@@ -379,7 +422,7 @@ export default function App() {
     if (!lyrics.length && projectId === null) return;
     const t = setTimeout(() => { void saveProject(true); }, 1800);
     return () => clearTimeout(t);
-  }, [ts, lyrics, aspect, intro, outro]);
+  }, [ts, lyrics, aspect, scenePreset, intro, outro]);
 
   const saveCustomPreset = async () => {
     const p: Preset = { name: `My Preset ${customPresets.length + 1}`, artist: "Custom · ของฉัน", dot: ts.color, style: { ...ts } };
@@ -565,10 +608,8 @@ export default function App() {
   const selBg = backgrounds.find((b) => b.id === selectedBg) || backgrounds[activeBgIdx] || null;
 
   const drawExportFrame = useCallback((ctx: CanvasRenderingContext2D, W: number, H: number) => {
-    ctx.save(); ctx.scale(W, H);
-    const backdrop = ctx.createRadialGradient(.5, .38, 0, .5, .38, .65);
-    backdrop.addColorStop(0, '#221D38'); backdrop.addColorStop(.62, '#0B0B0F'); backdrop.addColorStop(1, '#060607');
-    ctx.fillStyle = backdrop; ctx.fillRect(0, 0, 1, 1); ctx.restore();
+    const scene = SCENE_PRESETS.find((item) => item.id === scenePreset) || SCENE_PRESETS[0];
+    drawScenePreset(ctx, W, H, scene, currentTime);
     const drawBackground = (bg: BgItem, alpha: number) => {
       const layers = (bg.kind === 'video' ? [mediaRefs.current.get(bg.id + 'A'), mediaRefs.current.get(bg.id + 'B')] : [mediaRefs.current.get(bg.id)])
         .filter((el): el is HTMLElement => !!el)
@@ -604,7 +645,7 @@ export default function App() {
     if (inIntro) drawBookend(intro, currentTime);
     if (inOutro) drawBookend(outro, currentTime - introDur - songDur);
     if (ts.grain) drawGrain(ctx, W, H);
-  }, [backgrounds, activeBgIdx, activeLyric, ts, currentTime, songTime, segStart, segEnd, aspect, showPrev, prevBgIdx, prevOpacity, inIntro, inOutro, intro, outro, introDur, songDur]);
+  }, [backgrounds, activeBgIdx, activeLyric, ts, currentTime, songTime, segStart, segEnd, aspect, scenePreset, showPrev, prevBgIdx, prevOpacity, inIntro, inOutro, intro, outro, introDur, songDur]);
   const drawExportFrameRef = useRef(drawExportFrame);
   drawExportFrameRef.current = drawExportFrame;
 
@@ -1040,7 +1081,7 @@ export default function App() {
           </div>
 
           {/* Timeline pinned inside center bottom — fixed height, horizontal scroll only */}
-          <div className="h-[180px] shrink-0 overflow-hidden border-t border-[var(--border)] bg-[var(--surface)] max-xl:h-[132px]">
+          <div className="h-[220px] shrink-0 overflow-hidden border-t border-[var(--border)] bg-[var(--surface)] max-xl:h-[132px]">
             <div className="flex items-center gap-2 px-3.5 pt-2 max-xl:px-2 max-xl:pt-1">
               <Clock3 className="h-4 w-4 text-[var(--accent)]" /><span className={label}>Timeline · ไทม์ไลน์</span>
               <div className="ml-auto flex items-center gap-1.5">
@@ -1050,7 +1091,7 @@ export default function App() {
                 <button onClick={() => setTimelineZoom((z) => Math.min(300, z + 10))} className="rounded border border-[var(--border)] px-1.5 text-xs" aria-label="Zoom timeline in">+</button>
               </div>
             </div>
-            <div className="thin-scroll h-[calc(180px-34px)] overflow-x-auto overflow-y-hidden px-3.5 pb-2 pt-1.5 max-xl:h-[calc(132px-24px)] max-xl:px-2 max-xl:pt-1">
+            <div className="thin-scroll h-[calc(220px-34px)] overflow-x-auto overflow-y-hidden px-3.5 pb-2 pt-1.5 max-xl:h-[calc(132px-24px)] max-xl:px-2 max-xl:pt-1">
               <div style={{ width: `${timelineZoom}%`, minWidth: `${560 * timelineZoom / 100}px` }}>
                 <Waveform audioUrl={audioUrl} progress={duration ? songTime / songDur : 0} onSeek={(p) => seek(introDur + p * songDur)} tall />
                 <div className="relative mt-1.5 h-12 rounded-lg bg-black/40" title={titleAttr("Drag a block left/right to retime it", "ลากบล็อกซ้าย-ขวาเพื่อปรับเวลา")}>
@@ -1291,7 +1332,16 @@ export default function App() {
             </>)}
 
             {tab === "background" && (<>
-              {!selBgItem && <p className="py-8 text-center text-xs leading-relaxed text-[var(--muted)]">Select a background from the library first.<br />เลือกพื้นหลังจากคลังด้านซ้ายก่อน</p>}
+              <div className="space-y-2.5">
+                <div><p className={label}>Animated background presets · พื้นหลังแอนิเมชัน</p><p className="mt-1 text-[10px] leading-relaxed text-[var(--muted)]">ใช้ได้ทันทีโดยไม่ต้องใส่รูป และติดไปใน MP4 จริง</p></div>
+                <div className="grid grid-cols-2 gap-2">
+                  {SCENE_PRESETS.map((scene) => <button key={scene.id} onClick={() => { setScenePreset(scene.id); setNotice(`ใช้พื้นหลัง ${scene.name} แล้ว · Animated background applied`); }} className={`overflow-hidden border p-0 text-left transition ${scenePreset === scene.id ? "border-black ring-2 ring-[var(--accent)]" : "border-[var(--border)] hover:border-black"}`}>
+                    <span className={`scene-swatch scene-${scene.id} block h-16`} style={{ background: `linear-gradient(135deg, ${scene.colors.join(",")})` }} />
+                    <span className="block bg-white px-2 py-1.5"><span className="block text-[10px] font-bold uppercase">{scene.name}</span><span className="block text-[9px] text-[var(--muted)]">{scene.thai}</span></span>
+                  </button>)}
+                </div>
+              </div>
+              {!selBgItem && <p className="border-t border-[var(--border)] pt-3 text-[10px] leading-relaxed text-[var(--muted)]">ต้องการใช้รูปหรือวิดีโอของตัวเอง ให้เพิ่มจากแท็บ Media · พื้นหลังสำเร็จรูปด้านบนใช้ได้เลย</p>}
               {selBgItem && (<div className="space-y-3.5">
                 <div><p className="truncate text-xs font-bold">{selBgItem.name}</p><p className={label}>{selBgItem.kind} · {selBgItem.mediaDur ? `${fmt(selBgItem.mediaDur)} long` : "—"}</p></div>
                 {(selBgItem.kind === "image" || selBgItem.kind === "gif") && <Slider l="Show duration (s)" th="แสดงกี่วินาที" v={selBgItem.duration} min={1} max={30} step={0.5} on={(n) => patchBg(selBgItem.id, { duration: n })} />}

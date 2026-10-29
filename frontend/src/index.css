@@ -91,3 +91,24 @@ body { font-family:'JetBrains Mono', 'Noto Sans Thai', monospace; }
 .studio-sidebar input[type=range]::-webkit-slider-thumb { width:13px; height:13px; margin-top:-5px; background:#161616; border:0; border-radius:0; box-shadow:none; }
 .studio-sidebar input[type=range]::-moz-range-track { height:2px; background:#252525; }
 .studio-sidebar input[type=range]::-moz-range-thumb { width:13px; height:13px; background:#161616; border:0; border-radius:0; box-shadow:none; }
+
+/* Reference-led editorial layout: crisp dividers, generous white space, square controls. */
+@media (min-width:1280px){
+  .studio-header>div:first-child{ min-height:76px; padding:14px 26px; }
+  .studio-header>div:first-child>div:first-child>div:first-child{ display:none; }
+  .studio-center>div:first-child{ height:68px; padding-inline:28px; background:#fff; }
+  .studio-center>div:nth-child(2){ padding:34px 42px; background:#fbfaf8; }
+  .studio-sidebar{ background:#fff; }
+  .studio-sidebar>div{ padding:0; gap:0; }
+  .studio-sidebar>div>section,.studio-sidebar>div>div{ border-width:0 0 1px 0; padding:20px 26px; }
+}
+.studio-header button,.studio-sidebar button,.studio-sidebar input,.studio-sidebar textarea,.studio-sidebar select{ border-radius:0!important; }
+.studio-header{ box-shadow:none; }
+.studio-center canvas{ image-rendering:auto; }
+.scene-swatch{ position:relative; overflow:hidden; }
+.scene-swatch::after{ content:""; position:absolute; inset:-40%; background:radial-gradient(circle,rgba(255,255,255,.65),transparent 42%); animation:sceneDrift 5.8s ease-in-out infinite alternate; }
+.scene-aurora::after{ background:conic-gradient(from 20deg,transparent,rgba(40,255,190,.58),transparent,rgba(164,92,255,.55),transparent); filter:blur(12px); }
+.scene-ocean::after{ background:repeating-radial-gradient(ellipse at 50% 100%,transparent 0 10px,rgba(255,255,255,.18) 11px 12px); }
+.scene-spotlight::after{ background:radial-gradient(ellipse at 50% 5%,rgba(255,244,215,.78),transparent 58%); }
+.scene-midnight::after{ background-image:radial-gradient(circle at 20% 30%,#fff 0 1px,transparent 1.5px),radial-gradient(circle at 70% 55%,#fff 0 1px,transparent 1.5px); background-size:27px 31px,41px 37px; opacity:.5; }
+@keyframes sceneDrift{ from{ transform:translate3d(-8%,-3%,0) rotate(-4deg) } to{ transform:translate3d(10%,7%,0) rotate(8deg) } }
